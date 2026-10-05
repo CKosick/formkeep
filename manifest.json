@@ -1,0 +1,60 @@
+{
+  "manifest_version": 3,
+  "name": "FormKeep - Automatic Form Recovery",
+  "version": "1.0.0",
+  "description": "Silently saves what you type into web forms. Restore lost text with one click if a tab crashes, closes, or submit fails.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "FormKeep - Form Recovery",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "permissions": [
+    "storage",
+    "contextMenus",
+    "alarms",
+    "activeTab"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content/content.js"
+      ],
+      "css": [
+        "content/content.css"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+  "commands": {
+    "restore-text": {
+      "suggested_key": {
+        "default": "Alt+Shift+R"
+      },
+      "description": "Restore text into active field"
+    }
+  },
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
+  }
+}

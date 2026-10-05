@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FormKeep Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="settings-container">
+    <!-- Header -->
+    <header class="settings-header">
+      <div class="brand">
+        <img src="../icons/icon-48.png" alt="FormKeep" class="logo-icon">
+        <div>
+          <h1>FormKeep Settings</h1>
+          <p class="subtitle">100% private, local form recovery for Chrome</p>
+        </div>
+      </div>
+      <div class="header-badges">
+        <span class="badge badge-green">Zero Telemetry</span>
+        <span class="badge badge-indigo">100% Local</span>
+      </div>
+    </header>
+
+    <main class="settings-main">
+      <!-- Retention Settings Card -->
+      <section class="card">
+        <div class="card-header">
+          <h2>Data Retention</h2>
+          <span class="card-tag">Automated Cleanup</span>
+        </div>
+        <p class="card-desc">
+          Form snapshots older than your retention setting are automatically removed from your local database once daily.
+        </p>
+        <div class="form-row">
+          <label for="retentionSelect" class="form-label">Keep history for:</label>
+          <div class="input-with-button">
+            <select id="retentionSelect" class="select-input">
+              <option value="1">1 Day</option>
+              <option value="3">3 Days</option>
+              <option value="7" selected>7 Days (Recommended)</option>
+              <option value="14">14 Days</option>
+              <option value="30">30 Days</option>
+            </select>
+            <button id="btnRunCleanup" class="btn btn-secondary">Run Cleanup Now</button>
+          </div>
+        </div>
+        <div id="cleanupStatus" class="status-msg hidden"></div>
+      </section>
+
+      <!-- Disabled Sites Card -->
+      <section class="card">
+        <div class="card-header">
+          <h2>Disabled Websites</h2>
+          <span class="card-tag">Per-Site Privacy</span>
+        </div>
+        <p class="card-desc">
+          FormKeep will never capture or save any form data on these domains. You can also toggle this directly from the extension popup.
+        </p>
+        <div class="add-site-row">
+          <input type="text" id="newSiteInput" placeholder="e.g. sensitivebank.com or myintranet.local" class="text-input">
+          <button id="btnAddSite" class="btn btn-primary">Disable Site</button>
+        </div>
+        <div id="siteError" class="status-error hidden"></div>
+
+        <div class="disabled-sites-list-wrap">
+          <div id="emptyDisabledSites" class="empty-list-note">
+            No websites are currently disabled. FormKeep protects all sites except password fields.
+          </div>
+          <ul id="disabledSitesList" class="disabled-list"></ul>
+        </div>
+      </section>
+
+      <!-- Keyboard Shortcuts Card -->
+      <section class="card">
+        <div class="card-header">
+          <h2>Keyboard Shortcuts</h2>
+          <span class="card-tag">Quick Restore</span>
+        </div>
+        <p class="card-desc">
+          Restore text into the active field with a single keypress.
+        </p>
+        <div class="shortcut-row">
+          <div class="shortcut-info">
+            <strong>Restore Text into Active Field</strong>
+            <span class="shortcut-desc">Fills the active field with the latest snapshot or opens the picker</span>
+          </div>
+          <div class="shortcut-key">
+            <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>R</kbd>
+          </div>
+        </div>
+        <p class="shortcut-tip">
+          To customize this shortcut, visit <a href="chrome://extensions/shortcuts" target="_blank" class="link">chrome://extensions/shortcuts</a> in your browser.
+        </p>
+      </section>
+
+      <!-- Local Database Storage & Stats Card -->
+      <section class="card">
+        <div class="card-header">
+          <h2>Local Storage Statistics</h2>
+          <span class="card-tag">Device Only</span>
+        </div>
+        <p class="card-desc">
+          All data is stored directly in IndexedDB on this computer. No servers, no accounts, no analytics.
+        </p>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <span id="statTotalEntries" class="stat-num">0</span>
+            <span class="stat-label">Saved Snapshots</span>
+          </div>
+          <div class="stat-card">
+            <span id="statTotalSites" class="stat-num">0</span>
+            <span class="stat-label">Websites Protected</span>
+          </div>
+        </div>
+        <div class="danger-zone">
+          <div class="danger-info">
+            <strong>Clear All History</strong>
+            <span>Permanently delete all saved form recovery snapshots on this machine.</span>
+          </div>
+          <button id="btnClearAll" class="btn btn-danger">Clear All Data</button>
+        </div>
+      </section>
+
+      <!-- Privacy & Trust Philosophy -->
+      <section class="card card-subtle">
+        <div class="card-header">
+          <h2>FormKeep Trust Guarantee</h2>
+        </div>
+        <div class="trust-points">
+          <div class="trust-item">
+            <span class="trust-icon">🔒</span>
+            <div>
+              <strong>Zero Telemetry &amp; No Analytics</strong>
+              <p>FormKeep does not include Google Analytics, Sentry, Mixpanel, or any tracking code whatsoever.</p>
+            </div>
+          </div>
+          <div class="trust-item">
+            <span class="trust-icon">🚫</span>
+            <div>
+              <strong>Passwords Never Captured</strong>
+              <p>Password inputs, PIN fields, one-time auth codes, and CVVs are automatically detected and strictly excluded.</p>
+            </div>
+          </div>
+          <div class="trust-item">
+            <span class="trust-icon">💻</span>
+            <div>
+              <strong>100% Local Storage</strong>
+              <p>Your typing history never leaves your device. Check your browser's DevTools Network tab anytime to verify zero outbound requests.</p>
+            </div>
+          </div>
+          <div class="trust-item">
+            <span class="trust-icon">📖</span>
+            <div>
+              <strong>Open Source</strong>
+              <p>FormKeep is free, open source, and built to serve the community.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="settings-footer">
+      <span>FormKeep v1.0.0 (Manifest V3)</span>
+      <div class="footer-links">
+        <a href="../docs/privacy.html" target="_blank">Privacy Policy</a>
+      </div>
+    </footer>
+  </div>
+
+  <script type="module" src="options.js"></script>
+</body>
+</html>

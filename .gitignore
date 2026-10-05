@@ -1,0 +1,6 @@
+# Temporary profiles & caches
+*_profile/
+*.log
+.DS_Store
+Thumbs.db
+*.zip
