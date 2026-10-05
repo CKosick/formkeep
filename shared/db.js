@@ -8,6 +8,7 @@ const DB_NAME = 'FormKeepDB';
 const DB_VERSION = 1;
 const STORE_NAME = 'entries';
 const SESSION_WINDOW_MS = 30 * 60 * 1000; // 30 minutes for updating active typing session
+const MAX_TEXT_LENGTH = 250000; // Safeguard: 250k chars max per snapshot (~500KB)
 
 let dbInstance = null;
 
@@ -74,10 +75,13 @@ function countWords(str) {
  * @returns {Promise<Object>}
  */
 export async function saveEntry(data) {
-  const text = (data.text || '').trim();
+  let text = (data.text || '').trim();
   if (!text) {
     // Never overwrite with empty text - safeguard against cleared fields on submit
     return null;
+  }
+  if (text.length > MAX_TEXT_LENGTH) {
+    text = text.substring(0, MAX_TEXT_LENGTH);
   }
 
   const db = await getDB();
@@ -108,9 +112,9 @@ export async function saveEntry(data) {
           fieldName: data.fieldName || existing.fieldName || 'Form field',
           fieldSelector: data.fieldSelector || existing.fieldSelector || '',
           fieldType: data.fieldType || existing.fieldType || 'text',
-          text: data.text, // preserve full text with leading/trailing spaces as typed
-          charCount: data.text.length,
-          wordCount: countWords(data.text),
+          text: text, // preserve full text with leading/trailing spaces as typed
+          charCount: text.length,
+          wordCount: countWords(text),
           timestamp: now
         };
       } else {
@@ -124,9 +128,9 @@ export async function saveEntry(data) {
           fieldName: data.fieldName || 'Form field',
           fieldSelector: data.fieldSelector || '',
           fieldType: data.fieldType || 'text',
-          text: data.text,
-          charCount: data.text.length,
-          wordCount: countWords(data.text),
+          text: text,
+          charCount: text.length,
+          wordCount: countWords(text),
           createdAt: now,
           timestamp: now
         };
@@ -143,6 +147,7 @@ export async function saveEntry(data) {
 
 /**
  * Retrieve recent entries for a specific website hostname.
+ * Optimized to use the compound site_timestamp index for reverse chronological ordering.
  *
  * @param {string} site
  * @param {number} limit
@@ -155,16 +160,35 @@ export async function getEntriesBySite(site, limit = 50) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_NAME], 'readonly');
     const store = tx.objectStore(STORE_NAME);
-    const index = store.index('site');
-    const request = index.getAll(normalizedSite);
+    const results = [];
 
-    request.onsuccess = () => {
-      const results = request.result || [];
-      results.sort((a, b) => b.timestamp - a.timestamp);
-      resolve(results.slice(0, limit));
-    };
-
-    request.onerror = () => reject(request.error);
+    if (store.indexNames.contains('site_timestamp')) {
+      const index = store.index('site_timestamp');
+      const range = IDBKeyRange.bound(
+        [normalizedSite, 0],
+        [normalizedSite, Number.MAX_SAFE_INTEGER]
+      );
+      const cursorReq = index.openCursor(range, 'prev');
+      cursorReq.onsuccess = (event) => {
+        const cursor = event.target.result;
+        if (cursor && results.length < limit) {
+          results.push(cursor.value);
+          cursor.continue();
+        } else {
+          resolve(results);
+        }
+      };
+      cursorReq.onerror = () => reject(cursorReq.error);
+    } else {
+      const index = store.index('site');
+      const request = index.getAll(normalizedSite);
+      request.onsuccess = () => {
+        const list = request.result || [];
+        list.sort((a, b) => b.timestamp - a.timestamp);
+        resolve(list.slice(0, limit));
+      };
+      request.onerror = () => reject(request.error);
+    }
   });
 }
 

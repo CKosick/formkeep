@@ -1,5 +1,7 @@
 # Temporary profiles & caches
 *_profile/
+*_runner/
+test_profile*/
 *.log
 .DS_Store
 Thumbs.db

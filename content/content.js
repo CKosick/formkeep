@@ -15,7 +15,7 @@
   let isSiteDisabled = false;
   let lastFocusedElement = null;
   let contextMenuElement = null;
-  const pendingDebounces = new Map(); // element -> timer
+  const pendingDebounces = new WeakMap(); // element -> timer (WeakMap prevents memory leaks on detached DOM elements)
 
   // Track active picker UI element
   let activePickerEl = null;
@@ -195,6 +195,9 @@
    */
   function getFieldText(el) {
     if (!el) return '';
+    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+      return el.value || '';
+    }
     if (el.isContentEditable) {
       return el.innerText || el.textContent || '';
     }
@@ -413,20 +416,21 @@
 
   /**
    * Global Event Listeners for Input Capture.
+   * Uses { capture: true, passive: true } for optimal compositor performance.
    */
   document.addEventListener('input', (event) => {
     const target = event.target;
     if (isEligibleField(target)) {
       queueSnapshot(target, false);
     }
-  }, true);
+  }, { capture: true, passive: true });
 
   document.addEventListener('focusin', (event) => {
     const target = event.target;
     if (isEligibleField(target)) {
       lastFocusedElement = target;
     }
-  }, true);
+  }, { capture: true, passive: true });
 
   document.addEventListener('blur', (event) => {
     const target = event.target;
@@ -434,7 +438,7 @@
       // Flush any pending debounce immediately on blur
       queueSnapshot(target, true);
     }
-  }, true);
+  }, { capture: true, passive: true });
 
   document.addEventListener('contextmenu', (event) => {
     const target = event.target;

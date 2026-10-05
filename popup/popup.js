@@ -268,20 +268,23 @@ function renderCurrentView() {
 }
 
 /**
- * Render flat entries list.
+ * Render flat entries list with DocumentFragment for batched DOM updates.
  */
 function renderFlatEntries(entries) {
   entriesList.innerHTML = '';
+  const fragment = document.createDocumentFragment();
   entries.forEach((entry) => {
-    entriesList.appendChild(createEntryCard(entry));
+    fragment.appendChild(createEntryCard(entry));
   });
+  entriesList.appendChild(fragment);
 }
 
 /**
- * Render grouped entries by site.
+ * Render grouped entries by site with DocumentFragment.
  */
 function renderGroupedEntries(entries) {
   entriesList.innerHTML = '';
+  const fragment = document.createDocumentFragment();
   const groups = new Map();
 
   for (const entry of entries) {
@@ -296,12 +299,13 @@ function renderGroupedEntries(entries) {
     const header = document.createElement('div');
     header.className = 'site-group-header';
     header.innerHTML = `<span>🌐 ${escapeHTML(site)}</span><span class="site-group-badge">${siteEntries.length}</span>`;
-    entriesList.appendChild(header);
+    fragment.appendChild(header);
 
     for (const entry of siteEntries) {
-      entriesList.appendChild(createEntryCard(entry, false));
+      fragment.appendChild(createEntryCard(entry, false));
     }
   }
+  entriesList.appendChild(fragment);
 }
 
 /**
@@ -468,8 +472,12 @@ async function handleDeleteClick(id, cardEl) {
   }
 }
 
+let searchDebounceTimer = null;
 function handleSearchInput() {
-  renderCurrentView();
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(() => {
+    renderCurrentView();
+  }, 100);
 }
 
 function showLoading(isLoading) {

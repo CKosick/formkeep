@@ -69,6 +69,15 @@ FormKeep is designed so that future Pro capabilities (such as encrypted cloud ba
 
 ## Testing & Verification
 
+### Automated Test Suite
+Run the full unit and integration test suite:
+```bash
+node test/run-all-tests.js
+```
+- **Unit Tests (`test/unit-tests.js`):** Validates password/sensitive field exclusion heuristics, HTML escaping, word counting, and relative timestamps.
+- **Chromium Integration Tests (`test/integration-tests.js`):** Tests real IndexedDB transactions, compound index queries (`site_timestamp`), debounce coalescing, text size safeguards, and performance benchmarks inside a live browser instance.
+
+### Manual Verification
 1. Open `test/test-page.html` in Chrome.
 2. Type in the message textarea or rich compose box.
 3. Click **"Simulate Crash (Clear Fields)"**.
