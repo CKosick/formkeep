@@ -63,5 +63,5 @@ FormKeep is open source under the MIT License. Anyone can audit the complete cod
 
 If you have questions about FormKeep's privacy architecture or wish to report an issue, please contact us:
 
-- **GitHub Issues:** [https://github.com/cliff/formkeep/issues](https://github.com/cliff/formkeep/issues)
+- **GitHub Issues:** [https://github.com/CKosick/formkeep/issues](https://github.com/CKosick/formkeep/issues)
 - **Email:** support@formkeep.local

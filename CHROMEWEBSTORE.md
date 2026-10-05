@@ -35,7 +35,7 @@ Privacy & Trust:
 FormKeep is open source under the MIT License. It does not use any cloud servers, does not have user accounts, and makes zero outbound network requests. Verify our network activity at any time using Chrome DevTools.
 
 Support & Feedback:
-FormKeep is completely free with no paywalls or license keys. If you encounter issues or have suggestions, please visit our open source GitHub repository: https://github.com/cliff/formkeep
+FormKeep is completely free with no paywalls or license keys. If you encounter issues or have suggestions, please visit our open source GitHub repository: https://github.com/CKosick/formkeep
 
 **Category** [REQUIRED]
 Productivity
@@ -124,7 +124,7 @@ FormKeep does NOT collect, transmit, or share any user data off the device. All 
 
 **Publisher Name**: Cliff  
 **Contact Email**: support@formkeep.local  
-**Homepage URL**: https://github.com/cliff/formkeep  
+**Homepage URL**: https://github.com/CKosick/formkeep  
 
 ---
 
