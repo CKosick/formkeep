@@ -2,6 +2,7 @@
   "manifest_version": 3,
   "name": "FormKeep - Automatic Form Recovery",
   "version": "1.0.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1hxrSf+IlUzoZ5Tqw1bYMZIEk/YxnV1u9yWi4hxY7SJOgvf3TCDXhmeAsrfj95oGNKIXsY7YF197Hso+RokulG5U2mPXef+MMs3W3Brv15wSXDRl0wJMrJJ9GFJRP3wbZ75+rWX4Whycp7a5bp23+0YFGp25vpeH+YljEBcIgCaqMkQULNAM3JZxFuMbPnOzoI1R/VibKSYqMsdLmrUvuRkACBruYbAB9APe0OWVV8/r0mzlq3Q0Hg+fzraf7abUfEZr09yIWolZVqExRSVkTi4jrnDfKSuKENDGG/rJcVWVqISiiKgqcKCnLpCCnREcwoW3RGGbb+5etOj++fww3wIDAQAB",
   "description": "Silently saves what you type into web forms. Restore lost text with one click if a tab crashes, closes, or submit fails.",
   "icons": {
     "16": "icons/icon-16.png",

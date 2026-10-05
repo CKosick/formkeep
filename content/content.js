@@ -11,6 +11,21 @@
   if (window.__formkeep_initialized) return;
   window.__formkeep_initialized = true;
 
+  if (chrome.runtime?.id && document.documentElement) {
+    document.documentElement.dataset.formkeepId = chrome.runtime.id;
+  }
+
+  // Allow test / page scripts to request tab opens via service worker
+  window.addEventListener('message', (event) => {
+    if (!event.data || !event.data.type) return;
+    if (event.data.type === 'FORMKEEP_CMD_OPEN_OPTIONS' && chrome.runtime?.id) {
+      chrome.runtime.sendMessage({ type: 'FORMKEEP_OPEN_OPTIONS' });
+    }
+    if (event.data.type === 'FORMKEEP_CMD_OPEN_POPUP' && chrome.runtime?.id) {
+      chrome.runtime.sendMessage({ type: 'FORMKEEP_OPEN_POPUP' });
+    }
+  });
+
   const currentHostname = window.location.hostname.toLowerCase();
   let isSiteDisabled = false;
   let lastFocusedElement = null;

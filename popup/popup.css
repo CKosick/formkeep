@@ -569,3 +569,25 @@ input:checked + .slider:before {
 .hidden {
   display: none !important;
 }
+
+/* Responsive presentation when opened in full browser tab/window */
+@media (min-width: 600px) {
+  body {
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #f1f5f9;
+  }
+  .popup-container {
+    width: 380px;
+    height: 540px;
+    background: #ffffff;
+    border-radius: 12px;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+    border: 1px solid #cbd5e1;
+    overflow: hidden;
+  }
+}
+

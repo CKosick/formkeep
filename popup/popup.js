@@ -77,6 +77,13 @@ function setupEventListeners() {
  */
 async function initCurrentTab() {
   try {
+    const searchParams = new URLSearchParams(window.location.search);
+    if (searchParams.get('site')) {
+      currentHostname = searchParams.get('site').toLowerCase();
+      currentDomainEl.textContent = currentHostname;
+      return;
+    }
+
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     currentTab = tab;
 
@@ -103,9 +110,10 @@ async function initCurrentTab() {
       } catch (e) {}
     }
 
-    currentDomainEl.textContent = 'Special browser page';
-    document.getElementById('siteControlCard').style.opacity = '0.7';
+    currentDomainEl.textContent = 'All Sites Overview';
+    document.getElementById('siteControlCard').style.opacity = '0.9';
     siteToggle.disabled = true;
+    switchTab('all');
   } catch (err) {
     currentDomainEl.textContent = 'Unavailable';
   }

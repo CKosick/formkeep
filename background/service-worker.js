@@ -179,6 +179,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           break;
         }
 
+        case 'FORMKEEP_OPEN_OPTIONS': {
+          const tab = await chrome.tabs.create({ url: chrome.runtime.getURL('options/options.html') });
+          sendResponse({ success: true, tabId: tab.id });
+          break;
+        }
+
+        case 'FORMKEEP_OPEN_POPUP': {
+          const tab = await chrome.tabs.create({ url: chrome.runtime.getURL('popup/popup.html') });
+          sendResponse({ success: true, tabId: tab.id });
+          break;
+        }
+
         case 'FORMKEEP_RUN_CLEANUP': {
           const { retentionDays = DEFAULT_RETENTION_DAYS } = await chrome.storage.local.get('retentionDays');
           const removed = await cleanupOldEntries(message.retentionDays || retentionDays);
