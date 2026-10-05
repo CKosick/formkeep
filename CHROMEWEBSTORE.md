@@ -108,7 +108,7 @@ FormKeep does NOT collect, transmit, or share any user data off the device. All 
 ## Privacy Policy
 
 **Privacy Policy URL** [REQUIRED]
-`https://cliff.github.io/formkeep/privacy.html` (Local mirror in `docs/privacy.html` and `PRIVACY.md`)
+`https://ckosick.github.io/formkeep/privacy.html` (Local mirror in `docs/privacy.html` and `PRIVACY.md`)
 
 ---
 
