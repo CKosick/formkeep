@@ -133,3 +133,4 @@ FormKeep does NOT collect, transmit, or share any user data off the device. All 
 | Version | Date | Changes | Status |
 |---------|------|---------|--------|
 | 1.0.0 | 2026-10-05 | Initial release of FormKeep Manifest V3. Local IndexedDB storage, one-click restore, context menu, keyboard shortcuts, retention alarms, and password exclusion. | Ready for Submission |
+| 1.1.0 | 2026-10-14 | First-run experience: welcome page with a live self-test, toolbar badge and one-time first-save toast, popup opens on All Recent when the current site is empty, plain explanations on browser pages and after auto-cleanup. Restore is now strictly same-site (fails closed, top frame only, refused by the content script on mismatch). Clear All Data also erases per-site history. | Ready for Submission |
