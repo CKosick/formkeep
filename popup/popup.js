@@ -17,12 +17,14 @@ import {
 
 let currentTab = null;
 let currentHostname = '';
+let currentTabIsExtensionPage = false;
 let activeTabMode = 'current'; // 'current' | 'all'
 let initialTabDecisionMade = false;
 let allEntriesCache = [];
 let siteEntriesCache = [];
 let disabledSitesList = [];
 let cleanedUpCount = 0;
+let vaultEmptiedByCleanup = false;
 let retentionDaysSetting = 7;
 
 // DOM Elements
@@ -99,6 +101,8 @@ async function initCurrentTab() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     currentTab = tab;
 
+    currentTabIsExtensionPage = tab?.url ? isOwnExtensionPageUrl(tab.url) : false;
+
     const knownBrowserPage = tab?.url ? isBrowserPageUrl(tab.url) : false;
 
     if (tab?.url && !knownBrowserPage) {
@@ -111,10 +115,12 @@ async function initCurrentTab() {
     }
 
     // Fallback: request domain from content script. Skipped for known
-    // browser pages, where no content script can ever answer.
+    // browser pages, where no content script can ever answer. The probe
+    // targets the top frame, which is the page the popup means by
+    // "current site"; an embedded frame must not answer for it.
     if (tab?.id && !knownBrowserPage) {
       try {
-        const status = await chrome.tabs.sendMessage(tab.id, { type: 'FORMKEEP_GET_STATUS' });
+        const status = await chrome.tabs.sendMessage(tab.id, { type: 'FORMKEEP_GET_STATUS' }, { frameId: 0 });
         if (status?.site) {
           currentHostname = status.site.toLowerCase();
           currentDomainEl.textContent = currentHostname;
@@ -149,14 +155,32 @@ function isBrowserPageUrl(urlString) {
 }
 
 /**
+ * True for pages that belong to this extension itself (the welcome page,
+ * the options page). FormKeep's content script does run on the welcome
+ * page by design, so the browser-page explanation must not claim
+ * otherwise there.
+ */
+function isOwnExtensionPageUrl(urlString) {
+  if (!urlString) return false;
+  try {
+    const url = new URL(urlString);
+    return url.protocol === 'chrome-extension:' && url.hostname === chrome.runtime.id;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
  * The no-current-site state: All Sites overview, the site toggle disabled,
- * and one plain line explaining why FormKeep is not active here.
+ * and one plain line explaining why FormKeep is not active here. The line
+ * is only true of real browser pages; on this extension's own pages it
+ * stays hidden while All Recent still lists entries in copy-only mode.
  */
 function showBrowserPageState() {
   currentDomainEl.textContent = 'All Sites Overview';
   document.getElementById('siteControlCard').style.opacity = '0.9';
   siteToggle.disabled = true;
-  browserPageNote.classList.remove('hidden');
+  browserPageNote.classList.toggle('hidden', currentTabIsExtensionPage);
   switchTab('all');
 }
 
@@ -165,14 +189,16 @@ function showBrowserPageState() {
  */
 async function loadSettings() {
   try {
-    const { disabledSites = [], retentionDays = 7, cleanedUpCount: cleaned = 0 } = await chrome.storage.local.get([
+    const { disabledSites = [], retentionDays = 7, cleanedUpCount: cleaned = 0, vaultEmptiedByCleanup: emptiedByCleanup = false } = await chrome.storage.local.get([
       'disabledSites',
       'retentionDays',
-      'cleanedUpCount'
+      'cleanedUpCount',
+      'vaultEmptiedByCleanup'
     ]);
     disabledSitesList = disabledSites;
     retentionDaysSetting = retentionDays;
     cleanedUpCount = cleaned;
+    vaultEmptiedByCleanup = emptiedByCleanup;
 
     if (currentHostname) {
       const isDisabled = disabledSitesList.some(
@@ -303,7 +329,7 @@ function renderCurrentView() {
   if (entries.length === 0) {
     if (query) {
       showEmptyState(`No matches for "${escapeHTML(query)}"`);
-    } else if (shouldShowCleanupEmptyState(allEntriesCache.length, cleanedUpCount)) {
+    } else if (shouldShowCleanupEmptyState(allEntriesCache.length, vaultEmptiedByCleanup)) {
       // The vault is empty because the retention cleanup removed everything.
       // Say so, with the current retention period and a way to change it,
       // instead of letting the product look like it lost the user's text.
@@ -362,7 +388,7 @@ function renderGroupedEntries(entries) {
   for (const [site, siteEntries] of groups.entries()) {
     const header = document.createElement('div');
     header.className = 'site-group-header';
-    header.innerHTML = `<span>🌐 ${escapeHTML(site)}</span><span class="site-group-badge">${siteEntries.length}</span>`;
+    header.innerHTML = `<span>🌐 ${escapeHTML(displaySiteLabel(site))}</span><span class="site-group-badge">${siteEntries.length}</span>`;
     fragment.appendChild(header);
 
     for (const entry of siteEntries) {
@@ -379,10 +405,28 @@ function renderGroupedEntries(entries) {
  * True when a snapshot belongs to a different site than the tab the popup
  * is open on. Cross-site entries are never restorable from here: restoring
  * would drop the text into whatever field happens to be on the wrong page.
+ * The check fails closed: when the current site is unknown (browser pages,
+ * extension pages) or the entry has no recorded site, the entry cannot be
+ * proven same-site, so it is treated as another site's and offered in
+ * copy-only mode.
  */
 function isOtherSiteEntry(entry) {
-  if (!currentHostname || !entry?.site) return false;
+  if (!currentHostname || !entry?.site) return true;
   return entry.site.toLowerCase() !== currentHostname.toLowerCase();
+}
+
+/**
+ * Label for a site wherever the popup shows it to the user. Snapshots the
+ * welcome page self-test saves carry this extension's own ID as their
+ * site (the hostname of its chrome-extension:// URL); showing that raw ID
+ * reads like a bug, so it gets a friendly name. The stored value and all
+ * site comparisons keep using the real site; this is display only.
+ */
+function displaySiteLabel(site) {
+  if (site && chrome.runtime?.id && String(site).toLowerCase() === String(chrome.runtime.id).toLowerCase()) {
+    return 'FormKeep welcome page';
+  }
+  return site;
 }
 
 /**
@@ -414,13 +458,13 @@ function createEntryCard(entry, showSite = true) {
   // renderers (flat and grouped); the neutral site line stays suppressed in
   // the grouped view, where the group header already names the site.
   const siteLine = activeTabMode === 'all' && otherSite
-    ? `<div class="entry-other-site">Saved on another site: ${escapeHTML(entry.site)}</div>`
+    ? `<div class="entry-other-site">Saved on another site: ${escapeHTML(displaySiteLabel(entry.site))}</div>`
     : (showSite && activeTabMode === 'all'
-        ? `<div class="entry-site-line">🌐 ${escapeHTML(entry.site)}</div>`
+        ? `<div class="entry-site-line">🌐 ${escapeHTML(displaySiteLabel(entry.site))}</div>`
         : '');
 
   const restoreControl = otherSite
-    ? `<span class="entry-open-guidance">Open ${escapeHTML(entry.site)} to restore</span>`
+    ? `<span class="entry-open-guidance">Open ${escapeHTML(displaySiteLabel(entry.site))} to restore</span>`
     : `<button class="action-btn action-btn-primary btn-restore" title="Restore into field">
           ${restoreIcon}
           Restore
@@ -507,10 +551,10 @@ async function handleRestoreClick(entry, button) {
     try {
       await navigator.clipboard.writeText(entry.text);
       showPopupMessage(
-        `That snapshot was saved on ${entry.site}, so it was copied to your clipboard instead. Open ${entry.site} to restore it directly.`
+        `That snapshot was saved on ${displaySiteLabel(entry.site)}, so it was copied to your clipboard instead. Open ${displaySiteLabel(entry.site)} to restore it directly.`
       );
     } catch (err) {
-      showPopupMessage(`That snapshot was saved on ${entry.site}. Open that site to restore it.`);
+      showPopupMessage(`That snapshot was saved on ${displaySiteLabel(entry.site)}. Open that site to restore it.`);
     }
     return;
   }
@@ -527,11 +571,16 @@ async function handleRestoreClick(entry, button) {
 
   try {
     button.innerHTML = `<span>Restoring...</span>`;
+    // Top frame only: an unscoped tabs.sendMessage reaches every frame in
+    // the page, including embedded frames from other sites. The snapshot's
+    // site travels with the message and the content script refuses the
+    // restore if it does not match the receiving page's own hostname.
     const response = await chrome.tabs.sendMessage(currentTab.id, {
       type: 'FORMKEEP_RESTORE_TEXT',
       text: entry.text,
-      fieldSelector: entry.fieldSelector
-    });
+      fieldSelector: entry.fieldSelector,
+      site: entry.site
+    }, { frameId: 0 });
 
     if (response?.success) {
       button.innerHTML = `<span>✓ Restored!</span>`;
@@ -587,6 +636,13 @@ async function handleDeleteClick(id, cardEl) {
       badgeCurrentSite.textContent = siteEntriesCache.length;
       badgeAllSites.textContent = allEntriesCache.length;
 
+      if (allEntriesCache.length === 0) {
+        // The user just emptied the vault by hand in this session; the
+        // auto-cleanup explanation must not claim it (the storage layer
+        // records the same correction for the next popup open).
+        vaultEmptiedByCleanup = false;
+      }
+
       if (entriesList.children.length === 0) {
         // Re-render so the right empty state shows, including the
         // auto-cleanup explanation when the counter says it applies.
@@ -617,11 +673,13 @@ function showLoading(isLoading) {
 
 /**
  * The auto-cleanup explanation replaces the generic empty state only when
- * the whole vault is empty AND the cleanup has actually removed something.
- * A brand-new user (counter at zero) always sees the original copy.
+ * the whole vault is empty AND the retention cleanup is what emptied it
+ * (recorded as vaultEmptiedByCleanup by the storage layer). A vault the
+ * user emptied themselves, by Clear All or by deleting cards, always gets
+ * the standard empty state, even if a cleanup ran sometime in the past.
  */
-function shouldShowCleanupEmptyState(totalVaultCount, cleanedCount) {
-  return totalVaultCount === 0 && cleanedCount > 0;
+function shouldShowCleanupEmptyState(totalVaultCount, emptiedByCleanup) {
+  return totalVaultCount === 0 && emptiedByCleanup === true;
 }
 
 function showEmptyState(msg, options = {}) {
