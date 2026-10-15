@@ -315,6 +315,18 @@ input:checked + .slider:before {
   color: var(--primary);
 }
 
+/* Persistent Popup Message */
+.popup-message {
+  margin: 10px 16px 0;
+  padding: 8px 10px;
+  background-color: var(--primary-light);
+  border: 1px solid var(--primary-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-main);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 /* Content Area */
 .content-scroll {
   flex: 1;
@@ -449,6 +461,25 @@ input:checked + .slider:before {
   font-size: 11px;
   color: var(--text-muted);
   font-weight: 500;
+}
+
+.entry-site-line {
+  font-size: 10px;
+  color: #64748b;
+  margin-top: -4px;
+}
+
+.entry-other-site {
+  font-size: 11px;
+  font-weight: 600;
+  color: #b45309;
+  margin-top: -4px;
+}
+
+.entry-open-guidance {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
 }
 
 /* Entry Preview */

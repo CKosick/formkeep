@@ -39,6 +39,7 @@ const emptyState = document.getElementById('emptyState');
 const emptyStateMessage = document.getElementById('emptyStateMessage');
 const btnOptions = document.getElementById('btnOptions');
 const retentionNote = document.getElementById('retentionNote');
+const popupMessage = document.getElementById('popupMessage');
 
 document.addEventListener('DOMContentLoaded', async () => {
   setupEventListeners();
@@ -324,6 +325,25 @@ function renderGroupedEntries(entries) {
 /**
  * Create a single entry DOM card.
  */
+/**
+ * True when a snapshot belongs to a different site than the tab the popup
+ * is open on. Cross-site entries are never restorable from here: restoring
+ * would drop the text into whatever field happens to be on the wrong page.
+ */
+function isOtherSiteEntry(entry) {
+  if (!currentHostname || !entry?.site) return false;
+  return entry.site.toLowerCase() !== currentHostname.toLowerCase();
+}
+
+/**
+ * Show a message line inside the popup that stays visible until the popup
+ * closes. Used where the old transient button flash was easy to miss.
+ */
+function showPopupMessage(text) {
+  popupMessage.textContent = text;
+  popupMessage.classList.remove('hidden');
+}
+
 function createEntryCard(entry, showSite = true) {
   const card = document.createElement('div');
   card.className = 'entry-card';
@@ -333,6 +353,26 @@ function createEntryCard(entry, showSite = true) {
   const wordCount = entry.wordCount || countWords(entry.text);
   const charCount = entry.charCount || entry.text.length;
   const fieldTypeTag = entry.fieldType || 'text';
+  const otherSite = isOtherSiteEntry(entry);
+
+  const restoreIcon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>`;
+  const copyIcon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
+
+  // Cross-site entries get an explicit "another site" label and no Restore
+  // button at all. Copy becomes the primary action, with plain-text guidance
+  // on where the text can be restored.
+  const siteLine = showSite && activeTabMode === 'all'
+    ? (otherSite
+        ? `<div class="entry-other-site">Saved on another site: ${escapeHTML(entry.site)}</div>`
+        : `<div class="entry-site-line">🌐 ${escapeHTML(entry.site)}</div>`)
+    : '';
+
+  const restoreControl = otherSite
+    ? `<span class="entry-open-guidance">Open ${escapeHTML(entry.site)} to restore</span>`
+    : `<button class="action-btn action-btn-primary btn-restore" title="Restore into field">
+          ${restoreIcon}
+          Restore
+        </button>`;
 
   card.innerHTML = `
     <div class="entry-header">
@@ -344,17 +384,14 @@ function createEntryCard(entry, showSite = true) {
       </div>
       <span class="entry-time">${escapeHTML(timeStr)}</span>
     </div>
-    ${showSite && activeTabMode === 'all' ? `<div style="font-size:10px;color:#64748b;margin-top:-4px;">🌐 ${escapeHTML(entry.site)}</div>` : ''}
+    ${siteLine}
     <div class="entry-preview" title="Click to expand/collapse">${escapeHTML(entry.text)}</div>
     <div class="entry-footer">
       <span class="entry-stats">${wordCount} words • ${charCount} chars</span>
       <div class="entry-actions">
-        <button class="action-btn action-btn-primary btn-restore" title="Restore into field">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
-          Restore
-        </button>
-        <button class="action-btn action-btn-secondary btn-copy" title="Copy to clipboard">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+        ${restoreControl}
+        <button class="action-btn ${otherSite ? 'action-btn-primary' : 'action-btn-secondary'} btn-copy" title="Copy to clipboard">
+          ${copyIcon}
           Copy
         </button>
         <button class="action-btn-icon btn-delete" title="Delete snapshot" aria-label="Delete">
@@ -370,12 +407,14 @@ function createEntryCard(entry, showSite = true) {
     preview.classList.toggle('expanded');
   });
 
-  // Action: Restore
+  // Action: Restore (same-site entries only; cross-site cards have no button)
   const restoreBtn = card.querySelector('.btn-restore');
-  restoreBtn.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    await handleRestoreClick(entry, restoreBtn);
-  });
+  if (restoreBtn) {
+    restoreBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await handleRestoreClick(entry, restoreBtn);
+    });
+  }
 
   // Action: Copy
   const copyBtn = card.querySelector('.btn-copy');
@@ -409,10 +448,30 @@ function createEntryCard(entry, showSite = true) {
  * Handle restoring text into the active tab.
  */
 async function handleRestoreClick(entry, button) {
+  // Safety invariant, enforced here as well as in the card rendering: text
+  // is never inserted into a field on a different site than the one the
+  // snapshot came from. Cross-site entries fall back to the clipboard.
+  if (isOtherSiteEntry(entry)) {
+    try {
+      await navigator.clipboard.writeText(entry.text);
+      showPopupMessage(
+        `That snapshot was saved on ${entry.site}, so it was copied to your clipboard instead. Open ${entry.site} to restore it directly.`
+      );
+    } catch (err) {
+      showPopupMessage(`That snapshot was saved on ${entry.site}. Open that site to restore it.`);
+    }
+    return;
+  }
+
   if (!currentTab?.id) {
     button.innerHTML = `<span>No tab</span>`;
     return;
   }
+
+  const restoreLabel = `
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
+    Restore
+  `;
 
   try {
     button.innerHTML = `<span>Restoring...</span>`;
@@ -425,36 +484,36 @@ async function handleRestoreClick(entry, button) {
     if (response?.success) {
       button.innerHTML = `<span>✓ Restored!</span>`;
       setTimeout(() => {
-        button.innerHTML = `
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
-          Restore
-        `;
+        button.innerHTML = restoreLabel;
       }, 1500);
     } else {
-      // In case no field was focused, fallback to copying to clipboard
-      await navigator.clipboard.writeText(entry.text);
-      button.innerHTML = `<span>Copied to clip!</span>`;
-      setTimeout(() => {
-        button.innerHTML = `
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
-          Restore
-        `;
-      }, 2000);
+      // No field could take the text. Copy it and say so in a persistent
+      // popup line instead of a two-second button flash.
+      await copyWithClipboardNote(entry.text, button, restoreLabel);
     }
   } catch (err) {
-    // If content script is not running on this tab, copy to clipboard as fallback
-    try {
-      await navigator.clipboard.writeText(entry.text);
-      button.innerHTML = `<span>Copied to clip!</span>`;
-    } catch (clipErr) {
-      button.innerHTML = `<span>Error</span>`;
-    }
-    setTimeout(() => {
-      button.innerHTML = `
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
-        Restore
-      `;
-    }, 1500);
+    // The content script is not running on this tab (for example the page
+    // loaded before FormKeep was installed). Same clipboard fallback.
+    await copyWithClipboardNote(entry.text, button, restoreLabel);
+  }
+}
+
+/**
+ * Fallback for a same-site Restore that found no field: put the text on the
+ * clipboard and leave a persistent note in the popup explaining the next
+ * step. The note stays until the popup closes.
+ */
+async function copyWithClipboardNote(text, button, restoreLabel) {
+  try {
+    await navigator.clipboard.writeText(text);
+    showPopupMessage(
+      'The text was copied to your clipboard. Click into the field where you want it and paste.'
+    );
+  } catch (err) {
+    showPopupMessage('FormKeep could not restore or copy that text. Try opening the page again.');
+  }
+  if (button) {
+    button.innerHTML = restoreLabel;
   }
 }
 

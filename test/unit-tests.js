@@ -106,6 +106,12 @@ function shouldOpenOnAllRecentMock(currentSiteCount, allRecentCount) {
   return currentSiteCount === 0 && allRecentCount > 0;
 }
 
+// Mirrors isOtherSiteEntry in popup/popup.js
+function isOtherSiteEntryMock(entry, currentHostname) {
+  if (!currentHostname || !entry?.site) return false;
+  return entry.site.toLowerCase() !== currentHostname.toLowerCase();
+}
+
 // -------------------------------------------------------------
 // Test Execution Engine
 // -------------------------------------------------------------
@@ -245,6 +251,24 @@ describe('Popup Opening Tab Decision', () => {
 
   it('keeps the default view when nothing is saved anywhere', () => {
     assert.strictEqual(shouldOpenOnAllRecentMock(0, 0), false);
+  });
+});
+
+describe('Cross-Site Restore Safety', () => {
+  it('flags entries saved on a different site than the current tab', () => {
+    assert.strictEqual(isOtherSiteEntryMock({ site: 'site-a.com' }, 'site-b.com'), true);
+    assert.strictEqual(isOtherSiteEntryMock({ site: 'sub.site-a.com' }, 'site-a.com'), true);
+  });
+
+  it('treats same-site entries as restorable, case-insensitively', () => {
+    assert.strictEqual(isOtherSiteEntryMock({ site: 'Example.com' }, 'example.com'), false);
+    assert.strictEqual(isOtherSiteEntryMock({ site: 'example.com' }, 'example.com'), false);
+  });
+
+  it('never flags an entry when the current site is unknown (browser page)', () => {
+    assert.strictEqual(isOtherSiteEntryMock({ site: 'site-a.com' }, ''), false);
+    assert.strictEqual(isOtherSiteEntryMock({ site: 'site-a.com' }, null), false);
+    assert.strictEqual(isOtherSiteEntryMock({}, 'example.com'), false);
   });
 });
 
