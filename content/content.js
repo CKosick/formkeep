@@ -29,6 +29,15 @@
         const { disabledSites = [] } = await chrome.storage.local.get('disabledSites');
         updateDisabledState(disabledSites);
 
+        // Let the service worker sync this tab's toolbar badge with the
+        // snapshot count for this site.
+        try {
+          chrome.runtime.sendMessage({ type: 'FORMKEEP_PAGE_READY', site: currentHostname });
+        } catch (e) {
+          // Service worker may be starting up; badge also refreshes on save,
+          // tab activation, and page load completion.
+        }
+
         chrome.storage.onChanged.addListener((changes, area) => {
           if (area === 'local' && changes.disabledSites) {
             updateDisabledState(changes.disabledSites.newValue || []);
@@ -227,19 +236,32 @@
 
       try {
         if (chrome.runtime?.id) {
-          chrome.runtime.sendMessage({
-            type: 'FORMKEEP_SAVE_ENTRY',
-            payload: {
-              site: currentHostname,
-              url: window.location.href,
-              title: document.title || currentHostname,
-              fieldKey,
-              fieldName,
-              fieldSelector,
-              fieldType,
-              text
+          chrome.runtime.sendMessage(
+            {
+              type: 'FORMKEEP_SAVE_ENTRY',
+              payload: {
+                site: currentHostname,
+                url: window.location.href,
+                title: document.title || currentHostname,
+                fieldKey,
+                fieldName,
+                fieldSelector,
+                fieldType,
+                text
+              }
+            },
+            (response) => {
+              // Reading lastError keeps an unavailable service worker from
+              // logging an unchecked error; saving itself is fire-and-forget.
+              void chrome.runtime.lastError;
+              // One-time confirmation the very first time a snapshot is saved
+              // on this site, so users learn the tool is alive. The service
+              // worker decides when this fires; later saves stay silent.
+              if (response?.showFirstSaveToast) {
+                showToast('FormKeep saved a snapshot of this field');
+              }
             }
-          });
+          );
         }
       } catch (e) {
         // Context invalidated
@@ -462,21 +484,35 @@
     if (!message || !message.type) return;
 
     if (message.type === 'FORMKEEP_RESTORE_TEXT') {
+      // Cross-site invariant, enforced at the point of insertion: a popup
+      // restore must name the site its snapshot came from, and that site
+      // must be this page's own hostname. A missing or mismatched site is
+      // refused outright, so a snapshot can never be inserted into a page
+      // (or frame) belonging to a different site.
+      const messageSite = message.site ? String(message.site).toLowerCase() : '';
+      if (!messageSite || messageSite !== currentHostname) {
+        sendResponse({ success: false, error: 'Site mismatch' });
+        return true;
+      }
+
       let target = lastFocusedElement || contextMenuElement;
       if (!target && message.fieldSelector) {
         target = document.querySelector(message.fieldSelector);
       }
       if (!target) {
-        // Try currently focused element or first eligible field on page
+        // Only the field the user is actually in qualifies. There is no
+        // "first eligible field on the page" fallback: grabbing an
+        // arbitrary field could drop the text somewhere the user never
+        // chose. With no target the restore fails and the popup falls
+        // back to the clipboard with an explanatory note.
         const active = document.activeElement;
-        target = isEligibleField(active) ? active : document.querySelector('textarea, input[type="text"], [contenteditable="true"]');
+        target = isEligibleField(active) ? active : null;
       }
 
       if (target) {
         const ok = restoreTextIntoField(target, message.text);
         sendResponse({ success: ok });
       } else {
-        showToast('No form field selected to restore into');
         sendResponse({ success: false, error: 'No target field' });
       }
       return true;

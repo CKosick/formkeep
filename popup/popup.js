@@ -17,10 +17,15 @@ import {
 
 let currentTab = null;
 let currentHostname = '';
+let currentTabIsExtensionPage = false;
 let activeTabMode = 'current'; // 'current' | 'all'
+let initialTabDecisionMade = false;
 let allEntriesCache = [];
 let siteEntriesCache = [];
 let disabledSitesList = [];
+let cleanedUpCount = 0;
+let vaultEmptiedByCleanup = false;
+let retentionDaysSetting = 7;
 
 // DOM Elements
 const currentDomainEl = document.getElementById('currentDomain');
@@ -38,6 +43,9 @@ const emptyState = document.getElementById('emptyState');
 const emptyStateMessage = document.getElementById('emptyStateMessage');
 const btnOptions = document.getElementById('btnOptions');
 const retentionNote = document.getElementById('retentionNote');
+const popupMessage = document.getElementById('popupMessage');
+const emptyStateSettingsLink = document.getElementById('emptyStateSettingsLink');
+const browserPageNote = document.getElementById('browserPageNote');
 
 document.addEventListener('DOMContentLoaded', async () => {
   setupEventListeners();
@@ -60,6 +68,12 @@ function setupEventListeners() {
     searchInput.value = '';
     clearSearchBtn.classList.add('hidden');
     renderCurrentView();
+  });
+
+  // Empty-state link to the retention control in Settings
+  emptyStateSettingsLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    window.open(chrome.runtime.getURL('options/options.html#retention'));
   });
 
   // Settings / Options
@@ -87,21 +101,26 @@ async function initCurrentTab() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     currentTab = tab;
 
-    if (tab?.url) {
+    currentTabIsExtensionPage = tab?.url ? isOwnExtensionPageUrl(tab.url) : false;
+
+    const knownBrowserPage = tab?.url ? isBrowserPageUrl(tab.url) : false;
+
+    if (tab?.url && !knownBrowserPage) {
       try {
         const url = new URL(tab.url);
-        if (url.protocol === 'http:' || url.protocol === 'https:') {
-          currentHostname = url.hostname.toLowerCase();
-          currentDomainEl.textContent = currentHostname;
-          return;
-        }
+        currentHostname = url.hostname.toLowerCase();
+        currentDomainEl.textContent = currentHostname;
+        return;
       } catch (e) {}
     }
 
-    // Fallback: request domain from content script
-    if (tab?.id) {
+    // Fallback: request domain from content script. Skipped for known
+    // browser pages, where no content script can ever answer. The probe
+    // targets the top frame, which is the page the popup means by
+    // "current site"; an embedded frame must not answer for it.
+    if (tab?.id && !knownBrowserPage) {
       try {
-        const status = await chrome.tabs.sendMessage(tab.id, { type: 'FORMKEEP_GET_STATUS' });
+        const status = await chrome.tabs.sendMessage(tab.id, { type: 'FORMKEEP_GET_STATUS' }, { frameId: 0 });
         if (status?.site) {
           currentHostname = status.site.toLowerCase();
           currentDomainEl.textContent = currentHostname;
@@ -110,13 +129,59 @@ async function initCurrentTab() {
       } catch (e) {}
     }
 
-    currentDomainEl.textContent = 'All Sites Overview';
-    document.getElementById('siteControlCard').style.opacity = '0.9';
-    siteToggle.disabled = true;
-    switchTab('all');
+    showBrowserPageState();
   } catch (err) {
     currentDomainEl.textContent = 'Unavailable';
   }
+}
+
+/**
+ * Browser pages cannot run FormKeep: Chrome does not allow content scripts
+ * on chrome:// pages, the new tab page, or the Chrome Web Store (which is
+ * an https page, but a protected one). Anything that is not a normal
+ * http/https site counts.
+ */
+function isBrowserPageUrl(urlString) {
+  if (!urlString) return true;
+  try {
+    const url = new URL(urlString);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return true;
+    if (url.hostname === 'chromewebstore.google.com') return true;
+    if (url.hostname === 'chrome.google.com' && url.pathname.startsWith('/webstore')) return true;
+    return false;
+  } catch (e) {
+    return true;
+  }
+}
+
+/**
+ * True for pages that belong to this extension itself (the welcome page,
+ * the options page). FormKeep's content script does run on the welcome
+ * page by design, so the browser-page explanation must not claim
+ * otherwise there.
+ */
+function isOwnExtensionPageUrl(urlString) {
+  if (!urlString) return false;
+  try {
+    const url = new URL(urlString);
+    return url.protocol === 'chrome-extension:' && url.hostname === chrome.runtime.id;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * The no-current-site state: All Sites overview, the site toggle disabled,
+ * and one plain line explaining why FormKeep is not active here. The line
+ * is only true of real browser pages; on this extension's own pages it
+ * stays hidden while All Recent still lists entries in copy-only mode.
+ */
+function showBrowserPageState() {
+  currentDomainEl.textContent = 'All Sites Overview';
+  document.getElementById('siteControlCard').style.opacity = '0.9';
+  siteToggle.disabled = true;
+  browserPageNote.classList.toggle('hidden', currentTabIsExtensionPage);
+  switchTab('all');
 }
 
 /**
@@ -124,11 +189,16 @@ async function initCurrentTab() {
  */
 async function loadSettings() {
   try {
-    const { disabledSites = [], retentionDays = 7 } = await chrome.storage.local.get([
+    const { disabledSites = [], retentionDays = 7, cleanedUpCount: cleaned = 0, vaultEmptiedByCleanup: emptiedByCleanup = false } = await chrome.storage.local.get([
       'disabledSites',
-      'retentionDays'
+      'retentionDays',
+      'cleanedUpCount',
+      'vaultEmptiedByCleanup'
     ]);
     disabledSitesList = disabledSites;
+    retentionDaysSetting = retentionDays;
+    cleanedUpCount = cleaned;
+    vaultEmptiedByCleanup = emptiedByCleanup;
 
     if (currentHostname) {
       const isDisabled = disabledSitesList.some(
@@ -210,6 +280,18 @@ async function refreshData() {
     allEntriesCache = await getAllRecentEntries(100);
     badgeAllSites.textContent = allEntriesCache.length;
 
+    // First open only: never greet the user with an empty "This Site" pane
+    // when snapshots from other sites exist. Land on All Recent instead;
+    // "This Site" stays one click away. When the current site has entries,
+    // or nothing is saved anywhere, the default view is unchanged.
+    if (!initialTabDecisionMade) {
+      initialTabDecisionMade = true;
+      if (shouldOpenOnAllRecent(siteEntriesCache.length, allEntriesCache.length)) {
+        switchTab('all');
+        return;
+      }
+    }
+
     renderCurrentView();
   } catch (err) {
     console.error('[FormKeep] Error refreshing data:', err);
@@ -247,6 +329,14 @@ function renderCurrentView() {
   if (entries.length === 0) {
     if (query) {
       showEmptyState(`No matches for "${escapeHTML(query)}"`);
+    } else if (shouldShowCleanupEmptyState(allEntriesCache.length, vaultEmptiedByCleanup)) {
+      // The vault is empty because the retention cleanup removed everything.
+      // Say so, with the current retention period and a way to change it,
+      // instead of letting the product look like it lost the user's text.
+      showEmptyState(
+        `Your older snapshots were auto-cleaned. FormKeep keeps snapshots for ${retentionDaysSetting} days, and ${cleanedUpCount} snapshot${cleanedUpCount === 1 ? ' has' : 's have'} been cleaned up so far.`,
+        { showRetentionLink: true }
+      );
     } else if (activeTabMode === 'current') {
       showEmptyState(`No snapshots saved for ${currentHostname || 'this page'} yet.`);
     } else {
@@ -298,7 +388,7 @@ function renderGroupedEntries(entries) {
   for (const [site, siteEntries] of groups.entries()) {
     const header = document.createElement('div');
     header.className = 'site-group-header';
-    header.innerHTML = `<span>🌐 ${escapeHTML(site)}</span><span class="site-group-badge">${siteEntries.length}</span>`;
+    header.innerHTML = `<span>🌐 ${escapeHTML(displaySiteLabel(site))}</span><span class="site-group-badge">${siteEntries.length}</span>`;
     fragment.appendChild(header);
 
     for (const entry of siteEntries) {
@@ -311,6 +401,43 @@ function renderGroupedEntries(entries) {
 /**
  * Create a single entry DOM card.
  */
+/**
+ * True when a snapshot belongs to a different site than the tab the popup
+ * is open on. Cross-site entries are never restorable from here: restoring
+ * would drop the text into whatever field happens to be on the wrong page.
+ * The check fails closed: when the current site is unknown (browser pages,
+ * extension pages) or the entry has no recorded site, the entry cannot be
+ * proven same-site, so it is treated as another site's and offered in
+ * copy-only mode.
+ */
+function isOtherSiteEntry(entry) {
+  if (!currentHostname || !entry?.site) return true;
+  return entry.site.toLowerCase() !== currentHostname.toLowerCase();
+}
+
+/**
+ * Label for a site wherever the popup shows it to the user. Snapshots the
+ * welcome page self-test saves carry this extension's own ID as their
+ * site (the hostname of its chrome-extension:// URL); showing that raw ID
+ * reads like a bug, so it gets a friendly name. The stored value and all
+ * site comparisons keep using the real site; this is display only.
+ */
+function displaySiteLabel(site) {
+  if (site && chrome.runtime?.id && String(site).toLowerCase() === String(chrome.runtime.id).toLowerCase()) {
+    return 'FormKeep welcome page';
+  }
+  return site;
+}
+
+/**
+ * Show a message line inside the popup that stays visible until the popup
+ * closes. Used where the old transient button flash was easy to miss.
+ */
+function showPopupMessage(text) {
+  popupMessage.textContent = text;
+  popupMessage.classList.remove('hidden');
+}
+
 function createEntryCard(entry, showSite = true) {
   const card = document.createElement('div');
   card.className = 'entry-card';
@@ -320,6 +447,28 @@ function createEntryCard(entry, showSite = true) {
   const wordCount = entry.wordCount || countWords(entry.text);
   const charCount = entry.charCount || entry.text.length;
   const fieldTypeTag = entry.fieldType || 'text';
+  const otherSite = isOtherSiteEntry(entry);
+
+  const restoreIcon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>`;
+  const copyIcon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
+
+  // Cross-site entries get an explicit "another site" label and no Restore
+  // button at all. Copy becomes the primary action, with plain-text guidance
+  // on where the text can be restored. The label shows in both All Recent
+  // renderers (flat and grouped); the neutral site line stays suppressed in
+  // the grouped view, where the group header already names the site.
+  const siteLine = activeTabMode === 'all' && otherSite
+    ? `<div class="entry-other-site">Saved on another site: ${escapeHTML(displaySiteLabel(entry.site))}</div>`
+    : (showSite && activeTabMode === 'all'
+        ? `<div class="entry-site-line">🌐 ${escapeHTML(displaySiteLabel(entry.site))}</div>`
+        : '');
+
+  const restoreControl = otherSite
+    ? `<span class="entry-open-guidance">Open ${escapeHTML(displaySiteLabel(entry.site))} to restore</span>`
+    : `<button class="action-btn action-btn-primary btn-restore" title="Restore into field">
+          ${restoreIcon}
+          Restore
+        </button>`;
 
   card.innerHTML = `
     <div class="entry-header">
@@ -331,17 +480,14 @@ function createEntryCard(entry, showSite = true) {
       </div>
       <span class="entry-time">${escapeHTML(timeStr)}</span>
     </div>
-    ${showSite && activeTabMode === 'all' ? `<div style="font-size:10px;color:#64748b;margin-top:-4px;">🌐 ${escapeHTML(entry.site)}</div>` : ''}
+    ${siteLine}
     <div class="entry-preview" title="Click to expand/collapse">${escapeHTML(entry.text)}</div>
     <div class="entry-footer">
       <span class="entry-stats">${wordCount} words • ${charCount} chars</span>
       <div class="entry-actions">
-        <button class="action-btn action-btn-primary btn-restore" title="Restore into field">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
-          Restore
-        </button>
-        <button class="action-btn action-btn-secondary btn-copy" title="Copy to clipboard">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+        ${restoreControl}
+        <button class="action-btn ${otherSite ? 'action-btn-primary' : 'action-btn-secondary'} btn-copy" title="Copy to clipboard">
+          ${copyIcon}
           Copy
         </button>
         <button class="action-btn-icon btn-delete" title="Delete snapshot" aria-label="Delete">
@@ -357,12 +503,14 @@ function createEntryCard(entry, showSite = true) {
     preview.classList.toggle('expanded');
   });
 
-  // Action: Restore
+  // Action: Restore (same-site entries only; cross-site cards have no button)
   const restoreBtn = card.querySelector('.btn-restore');
-  restoreBtn.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    await handleRestoreClick(entry, restoreBtn);
-  });
+  if (restoreBtn) {
+    restoreBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await handleRestoreClick(entry, restoreBtn);
+    });
+  }
 
   // Action: Copy
   const copyBtn = card.querySelector('.btn-copy');
@@ -396,52 +544,77 @@ function createEntryCard(entry, showSite = true) {
  * Handle restoring text into the active tab.
  */
 async function handleRestoreClick(entry, button) {
+  // Safety invariant, enforced here as well as in the card rendering: text
+  // is never inserted into a field on a different site than the one the
+  // snapshot came from. Cross-site entries fall back to the clipboard.
+  if (isOtherSiteEntry(entry)) {
+    try {
+      await navigator.clipboard.writeText(entry.text);
+      showPopupMessage(
+        `That snapshot was saved on ${displaySiteLabel(entry.site)}, so it was copied to your clipboard instead. Open ${displaySiteLabel(entry.site)} to restore it directly.`
+      );
+    } catch (err) {
+      showPopupMessage(`That snapshot was saved on ${displaySiteLabel(entry.site)}. Open that site to restore it.`);
+    }
+    return;
+  }
+
   if (!currentTab?.id) {
     button.innerHTML = `<span>No tab</span>`;
     return;
   }
 
+  const restoreLabel = `
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
+    Restore
+  `;
+
   try {
     button.innerHTML = `<span>Restoring...</span>`;
+    // Top frame only: an unscoped tabs.sendMessage reaches every frame in
+    // the page, including embedded frames from other sites. The snapshot's
+    // site travels with the message and the content script refuses the
+    // restore if it does not match the receiving page's own hostname.
     const response = await chrome.tabs.sendMessage(currentTab.id, {
       type: 'FORMKEEP_RESTORE_TEXT',
       text: entry.text,
-      fieldSelector: entry.fieldSelector
-    });
+      fieldSelector: entry.fieldSelector,
+      site: entry.site
+    }, { frameId: 0 });
 
     if (response?.success) {
       button.innerHTML = `<span>✓ Restored!</span>`;
       setTimeout(() => {
-        button.innerHTML = `
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
-          Restore
-        `;
+        button.innerHTML = restoreLabel;
       }, 1500);
     } else {
-      // In case no field was focused, fallback to copying to clipboard
-      await navigator.clipboard.writeText(entry.text);
-      button.innerHTML = `<span>Copied to clip!</span>`;
-      setTimeout(() => {
-        button.innerHTML = `
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
-          Restore
-        `;
-      }, 2000);
+      // No field could take the text. Copy it and say so in a persistent
+      // popup line instead of a two-second button flash.
+      await copyWithClipboardNote(entry.text, button, restoreLabel);
     }
   } catch (err) {
-    // If content script is not running on this tab, copy to clipboard as fallback
-    try {
-      await navigator.clipboard.writeText(entry.text);
-      button.innerHTML = `<span>Copied to clip!</span>`;
-    } catch (clipErr) {
-      button.innerHTML = `<span>Error</span>`;
-    }
-    setTimeout(() => {
-      button.innerHTML = `
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
-        Restore
-      `;
-    }, 1500);
+    // The content script is not running on this tab (for example the page
+    // loaded before FormKeep was installed). Same clipboard fallback.
+    await copyWithClipboardNote(entry.text, button, restoreLabel);
+  }
+}
+
+/**
+ * Fallback for a same-site Restore that found no field: put the text on the
+ * clipboard and leave a persistent note in the popup explaining the next
+ * step. The note stays until the popup closes.
+ */
+async function copyWithClipboardNote(text, button, restoreLabel) {
+  try {
+    await navigator.clipboard.writeText(text);
+    showPopupMessage(
+      'The text was copied to your clipboard. Click into the field where you want it and paste.'
+    );
+  } catch (err) {
+    showPopupMessage('FormKeep could not restore or copy that text. Try opening the page again.');
+  }
+  if (button) {
+    button.innerHTML = restoreLabel;
   }
 }
 
@@ -463,8 +636,17 @@ async function handleDeleteClick(id, cardEl) {
       badgeCurrentSite.textContent = siteEntriesCache.length;
       badgeAllSites.textContent = allEntriesCache.length;
 
+      if (allEntriesCache.length === 0) {
+        // The user just emptied the vault by hand in this session; the
+        // auto-cleanup explanation must not claim it (the storage layer
+        // records the same correction for the next popup open).
+        vaultEmptiedByCleanup = false;
+      }
+
       if (entriesList.children.length === 0) {
-        showEmptyState('No snapshots found');
+        // Re-render so the right empty state shows, including the
+        // auto-cleanup explanation when the counter says it applies.
+        renderCurrentView();
       }
     }, 200);
   } catch (err) {
@@ -489,13 +671,34 @@ function showLoading(isLoading) {
   }
 }
 
-function showEmptyState(msg) {
+/**
+ * The auto-cleanup explanation replaces the generic empty state only when
+ * the whole vault is empty AND the retention cleanup is what emptied it
+ * (recorded as vaultEmptiedByCleanup by the storage layer). A vault the
+ * user emptied themselves, by Clear All or by deleting cards, always gets
+ * the standard empty state, even if a cleanup ran sometime in the past.
+ */
+function shouldShowCleanupEmptyState(totalVaultCount, emptiedByCleanup) {
+  return totalVaultCount === 0 && emptiedByCleanup === true;
+}
+
+function showEmptyState(msg, options = {}) {
   emptyStateMessage.textContent = msg;
+  emptyStateSettingsLink.classList.toggle('hidden', !options.showRetentionLink);
   emptyState.classList.remove('hidden');
 }
 
 function hideEmptyState() {
   emptyState.classList.add('hidden');
+  emptyStateSettingsLink.classList.add('hidden');
+}
+
+/**
+ * Decide the popup's opening tab: All Recent only when the current site has
+ * nothing saved but other sites do.
+ */
+function shouldOpenOnAllRecent(currentSiteCount, allRecentCount) {
+  return currentSiteCount === 0 && allRecentCount > 0;
 }
 
 function countWords(str) {

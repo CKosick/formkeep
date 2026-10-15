@@ -13,6 +13,38 @@ const MAX_TEXT_LENGTH = 250000; // Safeguard: 250k chars max per snapshot (~500K
 let dbInstance = null;
 
 /**
+ * Record (in chrome.storage.local, where available) whether the vault is
+ * empty because the retention cleanup emptied it. The popup uses this to
+ * decide if the auto-cleanup explanation fits an empty vault; manual
+ * deletions must clear it so the message is never shown for a vault the
+ * user emptied themselves. Guarded: this module is also imported from
+ * contexts without extension storage (tests), where it is a no-op.
+ */
+async function setVaultEmptiedByCleanup(value) {
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      await chrome.storage.local.set({ vaultEmptiedByCleanup: value });
+    }
+  } catch (e) {
+    // Bookkeeping only; never let it break a database operation.
+  }
+}
+
+/**
+ * Count every entry currently stored.
+ */
+async function countAllEntries() {
+  const db = await getDB();
+  return new Promise((resolve) => {
+    const tx = db.transaction([STORE_NAME], 'readonly');
+    const store = tx.objectStore(STORE_NAME);
+    const request = store.count();
+    request.onsuccess = () => resolve(request.result || 0);
+    request.onerror = () => resolve(0);
+  });
+}
+
+/**
  * Open and initialize the FormKeep IndexedDB database.
  * @returns {Promise<IDBDatabase>}
  */
@@ -290,7 +322,7 @@ export async function getEntryById(id) {
  */
 export async function deleteEntry(id) {
   const db = await getDB();
-  return new Promise((resolve, reject) => {
+  await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_NAME], 'readwrite');
     const store = tx.objectStore(STORE_NAME);
     const request = store.delete(id);
@@ -298,6 +330,13 @@ export async function deleteEntry(id) {
     request.onsuccess = () => resolve(true);
     request.onerror = () => reject(request.error);
   });
+
+  // A manual deletion is what emptied the vault when nothing remains, so
+  // an earlier auto-cleanup must not take the credit (or the blame).
+  if ((await countAllEntries()) === 0) {
+    await setVaultEmptiedByCleanup(false);
+  }
+  return true;
 }
 
 /**
@@ -335,7 +374,7 @@ export async function deleteEntriesForSite(site) {
  */
 export async function clearAllEntries() {
   const db = await getDB();
-  return new Promise((resolve, reject) => {
+  await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_NAME], 'readwrite');
     const store = tx.objectStore(STORE_NAME);
     const request = store.clear();
@@ -343,6 +382,22 @@ export async function clearAllEntries() {
     request.onsuccess = () => resolve(true);
     request.onerror = () => reject(request.error);
   });
+
+  // "Clear All Data" is a complete erasure (see PRIVACY.md): it must also
+  // remove the per-site history kept in chrome.storage.local, not just the
+  // snapshots. firstSaveToastSites is a growing list of every hostname the
+  // user has saved text on, and cleanedUpCount is an activity counter;
+  // neither may survive a wipe. User settings (retentionDays,
+  // disabledSites) are configuration, not history, and stay untouched.
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      await chrome.storage.local.remove(['firstSaveToastSites']);
+      await chrome.storage.local.set({ cleanedUpCount: 0, vaultEmptiedByCleanup: false });
+    }
+  } catch (e) {
+    // Bookkeeping only; the snapshots themselves are already gone.
+  }
+  return true;
 }
 
 /**
@@ -356,7 +411,7 @@ export async function cleanupOldEntries(retentionDays = 7) {
   const cutoff = Date.now() - (days * 24 * 60 * 60 * 1000);
   const db = await getDB();
 
-  return new Promise((resolve, reject) => {
+  const removed = await new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_NAME], 'readwrite');
     const store = tx.objectStore(STORE_NAME);
     const index = store.index('timestamp');
@@ -376,6 +431,37 @@ export async function cleanupOldEntries(retentionDays = 7) {
     };
 
     request.onerror = () => reject(request.error);
+  });
+
+  // Attribute an empty vault to this cleanup only when the cleanup itself
+  // is what left it empty. If snapshots remain, the flag is cleared too,
+  // so it always describes the vault's current state.
+  if (removed > 0) {
+    await setVaultEmptiedByCleanup((await countAllEntries()) === 0);
+  }
+  return removed;
+}
+
+/**
+ * Distinct sites that currently have at least one stored entry.
+ * Used to prune per-site history (firstSaveToastSites) down to sites
+ * that still exist after a retention cleanup.
+ *
+ * @returns {Promise<Array<string>>}
+ */
+export async function getAllSites() {
+  const db = await getDB();
+  return new Promise((resolve) => {
+    const tx = db.transaction([STORE_NAME], 'readonly');
+    const store = tx.objectStore(STORE_NAME);
+    const index = store.index('site');
+    const request = index.getAll();
+
+    request.onsuccess = () => {
+      const sites = new Set((request.result || []).map((item) => item.site));
+      resolve([...sites]);
+    };
+    request.onerror = () => resolve([]);
   });
 }
 

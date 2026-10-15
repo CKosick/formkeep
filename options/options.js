@@ -22,6 +22,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupEventListeners();
   await loadSettings();
   await refreshStats();
+
+  // Deep link from the popup's auto-cleanup empty state: land the user on
+  // the retention control itself, not just the settings page.
+  if (window.location.hash === '#retention') {
+    retentionSelect.scrollIntoView({ block: 'center' });
+    retentionSelect.focus({ preventScroll: true });
+  }
 });
 
 function setupEventListeners() {
