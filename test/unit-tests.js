@@ -101,6 +101,11 @@ function shouldShowFirstSaveToastMock(toastedSites, site) {
   return !(toastedSites || []).includes(site);
 }
 
+// Mirrors shouldOpenOnAllRecent in popup/popup.js
+function shouldOpenOnAllRecentMock(currentSiteCount, allRecentCount) {
+  return currentSiteCount === 0 && allRecentCount > 0;
+}
+
 // -------------------------------------------------------------
 // Test Execution Engine
 // -------------------------------------------------------------
@@ -224,6 +229,22 @@ describe('Visible Save Pulse (Badge & First-Save Toast)', () => {
     assert.strictEqual(shouldShowFirstSaveToastMock(['example.com'], 'example.com'), false);
     assert.strictEqual(shouldShowFirstSaveToastMock(['example.com'], 'other.com'), true);
     assert.strictEqual(shouldShowFirstSaveToastMock(undefined, 'example.com'), true);
+  });
+});
+
+describe('Popup Opening Tab Decision', () => {
+  it('opens on All Recent when the current site is empty but other sites have snapshots', () => {
+    assert.strictEqual(shouldOpenOnAllRecentMock(0, 3), true);
+    assert.strictEqual(shouldOpenOnAllRecentMock(0, 1), true);
+  });
+
+  it('opens on This Site when the current site has snapshots', () => {
+    assert.strictEqual(shouldOpenOnAllRecentMock(2, 5), false);
+    assert.strictEqual(shouldOpenOnAllRecentMock(1, 1), false);
+  });
+
+  it('keeps the default view when nothing is saved anywhere', () => {
+    assert.strictEqual(shouldOpenOnAllRecentMock(0, 0), false);
   });
 });
 

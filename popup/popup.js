@@ -18,6 +18,7 @@ import {
 let currentTab = null;
 let currentHostname = '';
 let activeTabMode = 'current'; // 'current' | 'all'
+let initialTabDecisionMade = false;
 let allEntriesCache = [];
 let siteEntriesCache = [];
 let disabledSitesList = [];
@@ -209,6 +210,18 @@ async function refreshData() {
 
     allEntriesCache = await getAllRecentEntries(100);
     badgeAllSites.textContent = allEntriesCache.length;
+
+    // First open only: never greet the user with an empty "This Site" pane
+    // when snapshots from other sites exist. Land on All Recent instead;
+    // "This Site" stays one click away. When the current site has entries,
+    // or nothing is saved anywhere, the default view is unchanged.
+    if (!initialTabDecisionMade) {
+      initialTabDecisionMade = true;
+      if (shouldOpenOnAllRecent(siteEntriesCache.length, allEntriesCache.length)) {
+        switchTab('all');
+        return;
+      }
+    }
 
     renderCurrentView();
   } catch (err) {
@@ -496,6 +509,14 @@ function showEmptyState(msg) {
 
 function hideEmptyState() {
   emptyState.classList.add('hidden');
+}
+
+/**
+ * Decide the popup's opening tab: All Recent only when the current site has
+ * nothing saved but other sites do.
+ */
+function shouldOpenOnAllRecent(currentSiteCount, allRecentCount) {
+  return currentSiteCount === 0 && allRecentCount > 0;
 }
 
 function countWords(str) {
