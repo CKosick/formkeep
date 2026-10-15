@@ -410,12 +410,14 @@ function createEntryCard(entry, showSite = true) {
 
   // Cross-site entries get an explicit "another site" label and no Restore
   // button at all. Copy becomes the primary action, with plain-text guidance
-  // on where the text can be restored.
-  const siteLine = showSite && activeTabMode === 'all'
-    ? (otherSite
-        ? `<div class="entry-other-site">Saved on another site: ${escapeHTML(entry.site)}</div>`
-        : `<div class="entry-site-line">🌐 ${escapeHTML(entry.site)}</div>`)
-    : '';
+  // on where the text can be restored. The label shows in both All Recent
+  // renderers (flat and grouped); the neutral site line stays suppressed in
+  // the grouped view, where the group header already names the site.
+  const siteLine = activeTabMode === 'all' && otherSite
+    ? `<div class="entry-other-site">Saved on another site: ${escapeHTML(entry.site)}</div>`
+    : (showSite && activeTabMode === 'all'
+        ? `<div class="entry-site-line">🌐 ${escapeHTML(entry.site)}</div>`
+        : '');
 
   const restoreControl = otherSite
     ? `<span class="entry-open-guidance">Open ${escapeHTML(entry.site)} to restore</span>`
