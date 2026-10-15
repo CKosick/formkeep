@@ -12,6 +12,7 @@ import {
   saveEntry,
   getEntriesBySite,
   getAllRecentEntries,
+  getAllSites,
   cleanupOldEntries,
   deleteEntry,
   clearAllEntries
@@ -55,8 +56,11 @@ async function refreshBadgeForTab(tabId, knownSite) {
   try {
     let site = knownSite;
     if (!site) {
+      // Probe the top frame only: with all_frames injection, an unscoped
+      // sendMessage is answered by whichever frame replies first, and an
+      // embedded frame would report its own site for this tab's badge.
       const status = await chrome.tabs
-        .sendMessage(tabId, { type: 'FORMKEEP_GET_STATUS' })
+        .sendMessage(tabId, { type: 'FORMKEEP_GET_STATUS' }, { frameId: 0 })
         .catch(() => null);
       site = status?.site;
     }
@@ -111,7 +115,45 @@ async function runCleanupTracked(retentionDays) {
     const { cleanedUpCount = 0 } = await chrome.storage.local.get('cleanedUpCount');
     await chrome.storage.local.set({ cleanedUpCount: cleanedUpCount + removed });
   }
+  // Prune the first-save toast history to sites that still have snapshots,
+  // so the per-site record does not outlive the data it describes.
+  try {
+    const { firstSaveToastSites = [] } = await chrome.storage.local.get('firstSaveToastSites');
+    if (firstSaveToastSites.length > 0) {
+      const sitesWithEntries = new Set(await getAllSites());
+      const pruned = firstSaveToastSites.filter((site) => sitesWithEntries.has(site));
+      if (pruned.length !== firstSaveToastSites.length) {
+        await chrome.storage.local.set({ firstSaveToastSites: pruned });
+      }
+    }
+  } catch (err) {
+    // Pruning is housekeeping; a failure must not fail the cleanup itself.
+  }
   return removed;
+}
+
+/**
+ * Claim the one-time first-save toast for a site. The read-check-write on
+ * firstSaveToastSites is serialized through a promise chain so two saves
+ * landing at the same moment cannot both win the toast: the second claim
+ * only runs after the first has recorded the site.
+ *
+ * @returns {Promise<boolean>} true when this caller earned the toast.
+ */
+let firstSaveToastClaimQueue = Promise.resolve();
+function claimFirstSaveToast(site) {
+  const claim = firstSaveToastClaimQueue.then(async () => {
+    const { firstSaveToastSites = [] } = await chrome.storage.local.get('firstSaveToastSites');
+    if (firstSaveToastSites.includes(site)) {
+      return false;
+    }
+    firstSaveToastSites.push(site);
+    await chrome.storage.local.set({ firstSaveToastSites });
+    return true;
+  });
+  // Keep the chain alive even if one claim fails.
+  firstSaveToastClaimQueue = claim.catch(() => {});
+  return claim;
 }
 
 /**
@@ -282,7 +324,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'FORMKEEP_SAVE_ENTRY': {
           const entry = await saveEntry(message.payload);
           let showFirstSaveToast = false;
-          if (entry) {
+          // Only the top frame speaks for the tab. Embedded frames save
+          // their own snapshots (that capture behaviour is unchanged),
+          // but a frame's save must not move the tab badge to the frame's
+          // site count, and the one-time first-save toast must not be
+          // spent inside a frame the user may never see.
+          if (entry && sender.frameId === 0) {
             // Visible pulse part 1: the saving tab's badge now shows the
             // snapshot count for its site.
             if (sender.tab?.id) {
@@ -291,12 +338,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             // Visible pulse part 2: the very first save on a site earns a
             // one-time page toast (sent back to the content script, which
             // owns the toast UI). Later saves on that site stay silent.
-            const { firstSaveToastSites = [] } = await chrome.storage.local.get('firstSaveToastSites');
-            if (!firstSaveToastSites.includes(entry.site)) {
-              firstSaveToastSites.push(entry.site);
-              await chrome.storage.local.set({ firstSaveToastSites });
-              showFirstSaveToast = true;
-            }
+            showFirstSaveToast = await claimFirstSaveToast(entry.site);
           }
           sendResponse({ success: true, entry, showFirstSaveToast });
           break;
@@ -304,7 +346,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         case 'FORMKEEP_PAGE_READY': {
           // A content script has loaded on a page: sync that tab's badge.
-          if (sender.tab?.id && message.site) {
+          // Every frame sends this with its own hostname, so only the top
+          // frame's signal counts; otherwise the last frame to load would
+          // decide the badge for the whole tab.
+          if (sender.frameId === 0 && sender.tab?.id && message.site) {
             await refreshBadgeForTab(sender.tab.id, message.site);
           }
           sendResponse({ success: true });
