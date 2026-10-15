@@ -311,6 +311,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           break;
         }
 
+        case 'FORMKEEP_REQUEST_RESTORE': {
+          // Sent by extension pages (the welcome page self-test) that want
+          // the standard restore flow run in their own tab. A page cannot
+          // reliably chrome.tabs.sendMessage its own tab (the message does
+          // not reach the page's own listener), so the worker relays it;
+          // the content listener in that tab then handles
+          // FORMKEEP_TRIGGER_RESTORE exactly as it does for the context
+          // menu and the Alt+Shift+R shortcut.
+          const tabId = sender.tab?.id;
+          if (tabId === undefined) {
+            sendResponse({ success: false, error: 'NO_TAB' });
+            break;
+          }
+          try {
+            const res = await chrome.tabs.sendMessage(tabId, {
+              type: 'FORMKEEP_TRIGGER_RESTORE',
+              source: message.source || 'page'
+            });
+            sendResponse(res || { success: false, error: 'NO_RESPONSE' });
+          } catch (err) {
+            sendResponse({ success: false, error: err.message });
+          }
+          break;
+        }
+
         case 'FORMKEEP_GET_SITE_ENTRIES': {
           const entries = await getEntriesBySite(message.site, message.limit || 50);
           sendResponse({ success: true, entries });

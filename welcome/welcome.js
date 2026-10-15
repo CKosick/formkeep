@@ -25,16 +25,17 @@
     if (testBox) testBox.focus();
 
     try {
-      const tab = await chrome.tabs.getCurrent();
-      if (tab?.id) {
-        // Send the same tab message the service worker sends for the
-        // right-click menu and the Alt+Shift+R shortcut, so the self-test
-        // restore runs through the identical content script handler.
-        await chrome.tabs.sendMessage(tab.id, {
-          type: 'FORMKEEP_TRIGGER_RESTORE',
-          source: 'welcomePage'
-        });
-      }
+      // Ask the service worker to relay the restore trigger into this tab.
+      // A page cannot reliably chrome.tabs.sendMessage its own tab (the
+      // message does not reach the page's own listener), while the worker's
+      // relay lands in the content script listener here exactly like the
+      // triggers the worker sends for the right-click menu and the
+      // Alt+Shift+R shortcut, so the self-test restore runs through the
+      // identical content script handler either way.
+      await chrome.runtime.sendMessage({
+        type: 'FORMKEEP_REQUEST_RESTORE',
+        source: 'welcomePage'
+      });
     } catch (err) {
       console.warn('[FormKeep] Welcome page restore failed:', err);
     }
