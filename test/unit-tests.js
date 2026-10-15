@@ -112,6 +112,11 @@ function isOtherSiteEntryMock(entry, currentHostname) {
   return entry.site.toLowerCase() !== currentHostname.toLowerCase();
 }
 
+// Mirrors shouldShowCleanupEmptyState in popup/popup.js
+function shouldShowCleanupEmptyStateMock(totalVaultCount, cleanedCount) {
+  return totalVaultCount === 0 && cleanedCount > 0;
+}
+
 // -------------------------------------------------------------
 // Test Execution Engine
 // -------------------------------------------------------------
@@ -269,6 +274,21 @@ describe('Cross-Site Restore Safety', () => {
     assert.strictEqual(isOtherSiteEntryMock({ site: 'site-a.com' }, ''), false);
     assert.strictEqual(isOtherSiteEntryMock({ site: 'site-a.com' }, null), false);
     assert.strictEqual(isOtherSiteEntryMock({}, 'example.com'), false);
+  });
+});
+
+describe('Cleanup Empty-State Explanation', () => {
+  it('explains auto-cleanup only when the vault is empty and cleanup removed entries', () => {
+    assert.strictEqual(shouldShowCleanupEmptyStateMock(0, 5), true);
+    assert.strictEqual(shouldShowCleanupEmptyStateMock(0, 1), true);
+  });
+
+  it('keeps the original empty state when nothing was ever cleaned up', () => {
+    assert.strictEqual(shouldShowCleanupEmptyStateMock(0, 0), false);
+  });
+
+  it('never shows the empty state while snapshots remain', () => {
+    assert.strictEqual(shouldShowCleanupEmptyStateMock(3, 5), false);
   });
 });
 

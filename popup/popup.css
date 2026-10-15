@@ -363,6 +363,18 @@ input:checked + .slider:before {
   margin-bottom: 12px;
 }
 
+.empty-settings-link {
+  margin-top: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.empty-settings-link:hover {
+  text-decoration: underline;
+}
+
 .spinner {
   width: 24px;
   height: 24px;

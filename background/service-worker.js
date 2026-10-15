@@ -100,6 +100,21 @@ async function refreshAllTabBadges() {
 }
 
 /**
+ * Run the retention cleanup and add however many snapshots it removed to
+ * the lifetime cleanedUpCount kept in storage. The popup reads that counter
+ * to explain an empty vault after a cleanup (the retention setting quietly
+ * removed everything) instead of presenting it as unexplained data loss.
+ */
+async function runCleanupTracked(retentionDays) {
+  const removed = await cleanupOldEntries(retentionDays);
+  if (removed > 0) {
+    const { cleanedUpCount = 0 } = await chrome.storage.local.get('cleanedUpCount');
+    await chrome.storage.local.set({ cleanedUpCount: cleanedUpCount + removed });
+  }
+  return removed;
+}
+
+/**
  * Extension installation and update lifecycle.
  */
 chrome.runtime.onInstalled.addListener(async (details) => {
@@ -138,7 +153,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   // Run an initial cleanup check
   const activeRetention = updates.retentionDays || retentionDays || DEFAULT_RETENTION_DAYS;
   try {
-    await cleanupOldEntries(activeRetention);
+    await runCleanupTracked(activeRetention);
   } catch (err) {
     console.warn('[FormKeep] Initial cleanup error:', err);
   }
@@ -169,7 +184,7 @@ chrome.runtime.onStartup.addListener(async () => {
 
   const { retentionDays = DEFAULT_RETENTION_DAYS } = await chrome.storage.local.get('retentionDays');
   try {
-    await cleanupOldEntries(retentionDays);
+    await runCleanupTracked(retentionDays);
   } catch (err) {
     console.warn('[FormKeep] Startup cleanup error:', err);
   }
@@ -182,7 +197,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === CLEANUP_ALARM_NAME) {
     try {
       const { retentionDays = DEFAULT_RETENTION_DAYS } = await chrome.storage.local.get('retentionDays');
-      const removed = await cleanupOldEntries(retentionDays);
+      const removed = await runCleanupTracked(retentionDays);
       if (removed > 0) {
         console.log(`[FormKeep] Automated retention cleanup removed ${removed} old entries.`);
       }
@@ -322,7 +337,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         case 'FORMKEEP_RUN_CLEANUP': {
           const { retentionDays = DEFAULT_RETENTION_DAYS } = await chrome.storage.local.get('retentionDays');
-          const removed = await cleanupOldEntries(message.retentionDays || retentionDays);
+          const removed = await runCleanupTracked(message.retentionDays || retentionDays);
           sendResponse({ success: true, removed });
           break;
         }

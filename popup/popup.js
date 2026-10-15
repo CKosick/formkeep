@@ -22,6 +22,8 @@ let initialTabDecisionMade = false;
 let allEntriesCache = [];
 let siteEntriesCache = [];
 let disabledSitesList = [];
+let cleanedUpCount = 0;
+let retentionDaysSetting = 7;
 
 // DOM Elements
 const currentDomainEl = document.getElementById('currentDomain');
@@ -40,6 +42,7 @@ const emptyStateMessage = document.getElementById('emptyStateMessage');
 const btnOptions = document.getElementById('btnOptions');
 const retentionNote = document.getElementById('retentionNote');
 const popupMessage = document.getElementById('popupMessage');
+const emptyStateSettingsLink = document.getElementById('emptyStateSettingsLink');
 
 document.addEventListener('DOMContentLoaded', async () => {
   setupEventListeners();
@@ -62,6 +65,12 @@ function setupEventListeners() {
     searchInput.value = '';
     clearSearchBtn.classList.add('hidden');
     renderCurrentView();
+  });
+
+  // Empty-state link to the retention control in Settings
+  emptyStateSettingsLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    window.open(chrome.runtime.getURL('options/options.html#retention'));
   });
 
   // Settings / Options
@@ -126,11 +135,14 @@ async function initCurrentTab() {
  */
 async function loadSettings() {
   try {
-    const { disabledSites = [], retentionDays = 7 } = await chrome.storage.local.get([
+    const { disabledSites = [], retentionDays = 7, cleanedUpCount: cleaned = 0 } = await chrome.storage.local.get([
       'disabledSites',
-      'retentionDays'
+      'retentionDays',
+      'cleanedUpCount'
     ]);
     disabledSitesList = disabledSites;
+    retentionDaysSetting = retentionDays;
+    cleanedUpCount = cleaned;
 
     if (currentHostname) {
       const isDisabled = disabledSitesList.some(
@@ -261,6 +273,14 @@ function renderCurrentView() {
   if (entries.length === 0) {
     if (query) {
       showEmptyState(`No matches for "${escapeHTML(query)}"`);
+    } else if (shouldShowCleanupEmptyState(allEntriesCache.length, cleanedUpCount)) {
+      // The vault is empty because the retention cleanup removed everything.
+      // Say so, with the current retention period and a way to change it,
+      // instead of letting the product look like it lost the user's text.
+      showEmptyState(
+        `Your older snapshots were auto-cleaned. FormKeep keeps snapshots for ${retentionDaysSetting} days, and ${cleanedUpCount} snapshot${cleanedUpCount === 1 ? ' has' : 's have'} been cleaned up so far.`,
+        { showRetentionLink: true }
+      );
     } else if (activeTabMode === 'current') {
       showEmptyState(`No snapshots saved for ${currentHostname || 'this page'} yet.`);
     } else {
@@ -536,7 +556,9 @@ async function handleDeleteClick(id, cardEl) {
       badgeAllSites.textContent = allEntriesCache.length;
 
       if (entriesList.children.length === 0) {
-        showEmptyState('No snapshots found');
+        // Re-render so the right empty state shows, including the
+        // auto-cleanup explanation when the counter says it applies.
+        renderCurrentView();
       }
     }, 200);
   } catch (err) {
@@ -561,13 +583,24 @@ function showLoading(isLoading) {
   }
 }
 
-function showEmptyState(msg) {
+/**
+ * The auto-cleanup explanation replaces the generic empty state only when
+ * the whole vault is empty AND the cleanup has actually removed something.
+ * A brand-new user (counter at zero) always sees the original copy.
+ */
+function shouldShowCleanupEmptyState(totalVaultCount, cleanedCount) {
+  return totalVaultCount === 0 && cleanedCount > 0;
+}
+
+function showEmptyState(msg, options = {}) {
   emptyStateMessage.textContent = msg;
+  emptyStateSettingsLink.classList.toggle('hidden', !options.showRetentionLink);
   emptyState.classList.remove('hidden');
 }
 
 function hideEmptyState() {
   emptyState.classList.add('hidden');
+  emptyStateSettingsLink.classList.add('hidden');
 }
 
 /**
