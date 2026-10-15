@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome to FormKeep</title>
+  <link rel="stylesheet" href="../content/content.css">
+  <link rel="stylesheet" href="welcome.css">
+</head>
+<body>
+  <main class="welcome-container">
+    <header class="welcome-header">
+      <img src="../icons/icon-48.png" alt="FormKeep" class="welcome-logo">
+      <div>
+        <h1>Welcome to FormKeep</h1>
+        <p class="welcome-tagline">FormKeep silently saves what you type into web forms, so a crashed tab, a closed window, or a failed submit never costs you your words. Everything stays on this device.</p>
+      </div>
+    </header>
+
+    <section class="welcome-card">
+      <h2>Step 1: Pin FormKeep to your toolbar</h2>
+      <p>Chrome does not pin new extensions automatically, and FormKeep works quietly in the background, so pin it now while you are thinking about it:</p>
+      <ol>
+        <li>Click the puzzle piece icon at the right end of the Chrome toolbar.</li>
+        <li>Find <strong>FormKeep - Automatic Form Recovery</strong> in the list.</li>
+        <li>Click the pin icon next to it. The FormKeep icon will stay visible next to the address bar, one click away.</li>
+      </ol>
+    </section>
+
+    <section class="welcome-card">
+      <h2>Step 2: Prove it works, right now</h2>
+      <p>The box below is a real form field, and FormKeep is already watching it, exactly like any form on the web.</p>
+      <ol>
+        <li>Type a sentence or two in the box, then wait a second while FormKeep saves it.</li>
+        <li>Reload this page. The box will come back empty, just like after a crash.</li>
+        <li>Click into the box, then click <strong>Restore my text</strong>. Your sentence comes back.</li>
+      </ol>
+      <label class="self-test-label" for="selfTestBox">Self-test box</label>
+      <textarea id="selfTestBox" rows="4" placeholder="Type a sentence here, then reload the page..."></textarea>
+      <div class="self-test-actions">
+        <button id="btnSelfTestRestore" class="welcome-btn" type="button">Restore my text</button>
+      </div>
+    </section>
+
+    <section class="welcome-card">
+      <h2>Three ways to restore your text, anywhere</h2>
+      <ul class="restore-routes">
+        <li><strong>Toolbar popup:</strong> click the FormKeep icon and press Restore on any saved snapshot.</li>
+        <li><strong>Right-click menu:</strong> right-click inside a text field and choose "FormKeep: Restore text".</li>
+        <li><strong>Keyboard:</strong> press <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>R</kbd> while a text field is focused.</li>
+      </ul>
+      <p class="welcome-note">FormKeep never captures passwords, PINs, one-time codes, or payment fields, and nothing you type ever leaves this computer.</p>
+    </section>
+  </main>
+
+  <!-- The real content script runs on this page, so the self-test box uses the
+       exact same capture and restore code paths as any web form. -->
+  <script src="../content/content.js"></script>
+  <script src="welcome.js"></script>
+</body>
+</html>

@@ -63,6 +63,18 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   } catch (err) {
     console.warn('[FormKeep] Initial cleanup error:', err);
   }
+
+  // First-run welcome page: open exactly once, on a genuine install only.
+  // onInstalled also fires for extension updates and browser updates, and it
+  // never fires on browser restart, so gating on reason 'install' gives the
+  // page a single showing per profile.
+  if (details.reason === 'install') {
+    try {
+      await chrome.tabs.create({ url: chrome.runtime.getURL('welcome/welcome.html') });
+    } catch (err) {
+      console.warn('[FormKeep] Could not open welcome page:', err);
+    }
+  }
 });
 
 /**
