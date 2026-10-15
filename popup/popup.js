@@ -43,6 +43,7 @@ const btnOptions = document.getElementById('btnOptions');
 const retentionNote = document.getElementById('retentionNote');
 const popupMessage = document.getElementById('popupMessage');
 const emptyStateSettingsLink = document.getElementById('emptyStateSettingsLink');
+const browserPageNote = document.getElementById('browserPageNote');
 
 document.addEventListener('DOMContentLoaded', async () => {
   setupEventListeners();
@@ -98,19 +99,20 @@ async function initCurrentTab() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     currentTab = tab;
 
-    if (tab?.url) {
+    const knownBrowserPage = tab?.url ? isBrowserPageUrl(tab.url) : false;
+
+    if (tab?.url && !knownBrowserPage) {
       try {
         const url = new URL(tab.url);
-        if (url.protocol === 'http:' || url.protocol === 'https:') {
-          currentHostname = url.hostname.toLowerCase();
-          currentDomainEl.textContent = currentHostname;
-          return;
-        }
+        currentHostname = url.hostname.toLowerCase();
+        currentDomainEl.textContent = currentHostname;
+        return;
       } catch (e) {}
     }
 
-    // Fallback: request domain from content script
-    if (tab?.id) {
+    // Fallback: request domain from content script. Skipped for known
+    // browser pages, where no content script can ever answer.
+    if (tab?.id && !knownBrowserPage) {
       try {
         const status = await chrome.tabs.sendMessage(tab.id, { type: 'FORMKEEP_GET_STATUS' });
         if (status?.site) {
@@ -121,13 +123,41 @@ async function initCurrentTab() {
       } catch (e) {}
     }
 
-    currentDomainEl.textContent = 'All Sites Overview';
-    document.getElementById('siteControlCard').style.opacity = '0.9';
-    siteToggle.disabled = true;
-    switchTab('all');
+    showBrowserPageState();
   } catch (err) {
     currentDomainEl.textContent = 'Unavailable';
   }
+}
+
+/**
+ * Browser pages cannot run FormKeep: Chrome does not allow content scripts
+ * on chrome:// pages, the new tab page, or the Chrome Web Store (which is
+ * an https page, but a protected one). Anything that is not a normal
+ * http/https site counts.
+ */
+function isBrowserPageUrl(urlString) {
+  if (!urlString) return true;
+  try {
+    const url = new URL(urlString);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return true;
+    if (url.hostname === 'chromewebstore.google.com') return true;
+    if (url.hostname === 'chrome.google.com' && url.pathname.startsWith('/webstore')) return true;
+    return false;
+  } catch (e) {
+    return true;
+  }
+}
+
+/**
+ * The no-current-site state: All Sites overview, the site toggle disabled,
+ * and one plain line explaining why FormKeep is not active here.
+ */
+function showBrowserPageState() {
+  currentDomainEl.textContent = 'All Sites Overview';
+  document.getElementById('siteControlCard').style.opacity = '0.9';
+  siteToggle.disabled = true;
+  browserPageNote.classList.remove('hidden');
+  switchTab('all');
 }
 
 /**

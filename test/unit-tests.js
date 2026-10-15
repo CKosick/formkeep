@@ -117,6 +117,20 @@ function shouldShowCleanupEmptyStateMock(totalVaultCount, cleanedCount) {
   return totalVaultCount === 0 && cleanedCount > 0;
 }
 
+// Mirrors isBrowserPageUrl in popup/popup.js
+function isBrowserPageUrlMock(urlString) {
+  if (!urlString) return true;
+  try {
+    const url = new URL(urlString);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return true;
+    if (url.hostname === 'chromewebstore.google.com') return true;
+    if (url.hostname === 'chrome.google.com' && url.pathname.startsWith('/webstore')) return true;
+    return false;
+  } catch (e) {
+    return true;
+  }
+}
+
 // -------------------------------------------------------------
 // Test Execution Engine
 // -------------------------------------------------------------
@@ -289,6 +303,31 @@ describe('Cleanup Empty-State Explanation', () => {
 
   it('never shows the empty state while snapshots remain', () => {
     assert.strictEqual(shouldShowCleanupEmptyStateMock(3, 5), false);
+  });
+});
+
+describe('Browser Page Detection', () => {
+  it('treats chrome:// pages and the new tab page as browser pages', () => {
+    assert.strictEqual(isBrowserPageUrlMock('chrome://extensions/'), true);
+    assert.strictEqual(isBrowserPageUrlMock('chrome://newtab/'), true);
+    assert.strictEqual(isBrowserPageUrlMock('about:blank'), true);
+  });
+
+  it('treats the Chrome Web Store as a browser page despite its https URL', () => {
+    assert.strictEqual(isBrowserPageUrlMock('https://chromewebstore.google.com/detail/formkeep/abc123'), true);
+    assert.strictEqual(isBrowserPageUrlMock('https://chrome.google.com/webstore/detail/abc123'), true);
+  });
+
+  it('treats normal websites as runnable', () => {
+    assert.strictEqual(isBrowserPageUrlMock('https://example.com/form'), false);
+    assert.strictEqual(isBrowserPageUrlMock('http://localhost:3000/app'), false);
+    assert.strictEqual(isBrowserPageUrlMock('https://chrome.google.com/other'), false);
+  });
+
+  it('treats missing or malformed URLs as browser pages', () => {
+    assert.strictEqual(isBrowserPageUrlMock(''), true);
+    assert.strictEqual(isBrowserPageUrlMock(undefined), true);
+    assert.strictEqual(isBrowserPageUrlMock('not a url'), true);
   });
 });
 
