@@ -5,6 +5,18 @@
  */
 
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+
+// Shipped sources, for the wiring assertions at the bottom of this file.
+// The mock-based suites above prove the logic as written; these checks
+// prove the shipped files actually contain the behaviour.
+const shippedSources = {
+  popupJs: fs.readFileSync(path.join(__dirname, '..', 'popup', 'popup.js'), 'utf8'),
+  contentJs: fs.readFileSync(path.join(__dirname, '..', 'content', 'content.js'), 'utf8'),
+  serviceWorkerJs: fs.readFileSync(path.join(__dirname, '..', 'background', 'service-worker.js'), 'utf8'),
+  dbJs: fs.readFileSync(path.join(__dirname, '..', 'shared', 'db.js'), 'utf8')
+};
 
 // 1. Re-exportable logic helpers replicating content script algorithms
 function isPasswordFieldMock(el) {
@@ -106,15 +118,18 @@ function shouldOpenOnAllRecentMock(currentSiteCount, allRecentCount) {
   return currentSiteCount === 0 && allRecentCount > 0;
 }
 
-// Mirrors isOtherSiteEntry in popup/popup.js
+// Mirrors isOtherSiteEntry in popup/popup.js (fails closed: an unknown
+// current site or an entry with no recorded site counts as another site)
 function isOtherSiteEntryMock(entry, currentHostname) {
-  if (!currentHostname || !entry?.site) return false;
+  if (!currentHostname || !entry?.site) return true;
   return entry.site.toLowerCase() !== currentHostname.toLowerCase();
 }
 
-// Mirrors shouldShowCleanupEmptyState in popup/popup.js
-function shouldShowCleanupEmptyStateMock(totalVaultCount, cleanedCount) {
-  return totalVaultCount === 0 && cleanedCount > 0;
+// Mirrors shouldShowCleanupEmptyState in popup/popup.js: the explanation
+// requires the recorded vaultEmptiedByCleanup attribution, not merely a
+// nonzero lifetime cleanup counter.
+function shouldShowCleanupEmptyStateMock(totalVaultCount, emptiedByCleanup) {
+  return totalVaultCount === 0 && emptiedByCleanup === true;
 }
 
 // Mirrors isBrowserPageUrl in popup/popup.js
@@ -284,25 +299,33 @@ describe('Cross-Site Restore Safety', () => {
     assert.strictEqual(isOtherSiteEntryMock({ site: 'example.com' }, 'example.com'), false);
   });
 
-  it('never flags an entry when the current site is unknown (browser page)', () => {
-    assert.strictEqual(isOtherSiteEntryMock({ site: 'site-a.com' }, ''), false);
-    assert.strictEqual(isOtherSiteEntryMock({ site: 'site-a.com' }, null), false);
-    assert.strictEqual(isOtherSiteEntryMock({}, 'example.com'), false);
+  it('flags every entry when the current site is unknown (fails closed on browser and extension pages)', () => {
+    assert.strictEqual(isOtherSiteEntryMock({ site: 'site-a.com' }, ''), true);
+    assert.strictEqual(isOtherSiteEntryMock({ site: 'site-a.com' }, null), true);
+    assert.strictEqual(isOtherSiteEntryMock({ site: 'site-a.com' }, undefined), true);
+  });
+
+  it('flags entries with no recorded site (cannot be proven same-site)', () => {
+    assert.strictEqual(isOtherSiteEntryMock({}, 'example.com'), true);
+    assert.strictEqual(isOtherSiteEntryMock({ site: '' }, 'example.com'), true);
   });
 });
 
 describe('Cleanup Empty-State Explanation', () => {
-  it('explains auto-cleanup only when the vault is empty and cleanup removed entries', () => {
-    assert.strictEqual(shouldShowCleanupEmptyStateMock(0, 5), true);
-    assert.strictEqual(shouldShowCleanupEmptyStateMock(0, 1), true);
+  it('explains auto-cleanup only when the vault is empty and the cleanup emptied it', () => {
+    assert.strictEqual(shouldShowCleanupEmptyStateMock(0, true), true);
+  });
+
+  it('keeps the standard empty state for a manually emptied vault, even after past cleanups', () => {
+    assert.strictEqual(shouldShowCleanupEmptyStateMock(0, false), false);
   });
 
   it('keeps the original empty state when nothing was ever cleaned up', () => {
-    assert.strictEqual(shouldShowCleanupEmptyStateMock(0, 0), false);
+    assert.strictEqual(shouldShowCleanupEmptyStateMock(0, undefined), false);
   });
 
   it('never shows the empty state while snapshots remain', () => {
-    assert.strictEqual(shouldShowCleanupEmptyStateMock(3, 5), false);
+    assert.strictEqual(shouldShowCleanupEmptyStateMock(3, true), false);
   });
 });
 
@@ -328,6 +351,159 @@ describe('Browser Page Detection', () => {
     assert.strictEqual(isBrowserPageUrlMock(''), true);
     assert.strictEqual(isBrowserPageUrlMock(undefined), true);
     assert.strictEqual(isBrowserPageUrlMock('not a url'), true);
+  });
+});
+
+describe('Shipped-Code Wiring (assertions against the real files)', () => {
+  it('popup fails closed: shipped isOtherSiteEntry returns true when the current site is unknown', () => {
+    assert.ok(/if \(!currentHostname \|\| !entry\?\.site\) return true;/.test(shippedSources.popupJs));
+  });
+
+  it('popup sends restores to the top frame with the snapshot site attached', () => {
+    assert.ok(shippedSources.popupJs.includes("type: 'FORMKEEP_RESTORE_TEXT'"));
+    assert.ok(shippedSources.popupJs.includes('site: entry.site'));
+    assert.ok(shippedSources.popupJs.includes('}, { frameId: 0 });'));
+  });
+
+  it('content script refuses restores whose site does not match its own hostname', () => {
+    assert.ok(shippedSources.contentJs.includes("error: 'Site mismatch'"));
+    assert.ok(shippedSources.contentJs.includes('messageSite !== currentHostname'));
+  });
+
+  it('content script has no first-eligible-field fallback for popup restores', () => {
+    assert.ok(!shippedSources.contentJs.includes('input[type="text"], [contenteditable="true"]'));
+  });
+
+  it('Clear All erases the per-site toast history (shared/db.js)', () => {
+    assert.ok(shippedSources.dbJs.includes("chrome.storage.local.remove(['firstSaveToastSites'])"));
+  });
+
+  it('badge signals are top-frame only in the service worker, and the badge probe targets frame 0', () => {
+    assert.ok(shippedSources.serviceWorkerJs.includes('sender.frameId === 0'));
+    assert.ok(shippedSources.serviceWorkerJs.includes("{ type: 'FORMKEEP_GET_STATUS' }, { frameId: 0 }"));
+  });
+
+  it('cleanup attribution flag is written by the storage layer and read by the popup', () => {
+    assert.ok(shippedSources.dbJs.includes('vaultEmptiedByCleanup'));
+    assert.ok(shippedSources.popupJs.includes('vaultEmptiedByCleanup'));
+  });
+
+  it('welcome page snapshots get a friendly display label in the popup', () => {
+    assert.ok(shippedSources.popupJs.includes("'FormKeep welcome page'"));
+  });
+});
+
+describe('Welcome Self-Test Path (real shipped content.js, driven in a vm)', () => {
+  // Loads the actual content/content.js, runs it on a chrome-extension://
+  // hostname (the welcome page, whose hostname is the extension ID), and
+  // drives its real message listener. This is the exact code path the
+  // welcome page self-test uses: FORMKEEP_TRIGGER_RESTORE (relayed by the
+  // service worker) must restore there, while popup-style
+  // FORMKEEP_RESTORE_TEXT messages are site-checked.
+  const vm = require('vm');
+  const EXT_ID = 'extid1234567890abcdef12345678';
+
+  class FakeElement {
+    constructor(tagName) {
+      this.tagName = tagName;
+      this.value = '';
+      this.id = '';
+      this.name = '';
+      this.placeholder = '';
+      this.isContentEditable = false;
+    }
+    getAttribute() { return null; }
+    closest() { return null; }
+    focus() {}
+    select() {}
+    blur() {}
+    dispatchEvent() { return true; }
+  }
+
+  function loadRealContentScript() {
+    const textarea = new FakeElement('TEXTAREA');
+    const docListeners = {};
+    let messageListener = null;
+
+    const documentStub = {
+      addEventListener: (type, fn) => { (docListeners[type] = docListeners[type] || []).push(fn); },
+      querySelector: () => null,
+      querySelectorAll: () => [],
+      createElement: () => ({ className: '', innerHTML: '', style: {}, remove() {} }),
+      body: { appendChild: () => {} },
+      activeElement: textarea,
+      execCommand: () => true
+    };
+
+    const chromeStub = {
+      runtime: {
+        id: EXT_ID,
+        onMessage: { addListener: (fn) => { messageListener = fn; } },
+        sendMessage: (msg, cb) => {
+          if (msg && msg.type === 'FORMKEEP_GET_SITE_ENTRIES' && cb) {
+            cb({ success: true, entries: [{ text: 'self test sentence', site: EXT_ID }] });
+          }
+        }
+      },
+      storage: {
+        local: { get: async () => ({ disabledSites: [] }) },
+        onChanged: { addListener: () => {} }
+      }
+    };
+
+    const sandbox = {
+      window: { location: { hostname: EXT_ID, href: `chrome-extension://${EXT_ID}/welcome/welcome.html` } },
+      document: documentStub,
+      chrome: chromeStub,
+      HTMLElement: FakeElement,
+      Event: class {},
+      CSS: { escape: (s) => String(s) },
+      console,
+      setTimeout: () => 0,
+      clearTimeout: () => {}
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(shippedSources.contentJs, sandbox);
+
+    // The user clicks into the self-test box before pressing Restore.
+    (docListeners['focusin'] || []).forEach((fn) => fn({ target: textarea }));
+
+    return { textarea, send: (msg) => {
+      let response;
+      messageListener(msg, {}, (r) => { response = r; });
+      return response;
+    } };
+  }
+
+  it('restores through FORMKEEP_TRIGGER_RESTORE on the extension-page hostname (the self-test path)', () => {
+    const { textarea, send } = loadRealContentScript();
+    const response = send({ type: 'FORMKEEP_TRIGGER_RESTORE', source: 'welcomePage' });
+    // Field checks, not deepStrictEqual: the response object was created
+    // inside the vm realm, so its prototype differs from this realm's.
+    assert.strictEqual(response && response.success, true);
+    assert.strictEqual(textarea.value, 'self test sentence');
+  });
+
+  it('refuses a FORMKEEP_RESTORE_TEXT whose site does not match the page hostname', () => {
+    const { textarea, send } = loadRealContentScript();
+    const response = send({ type: 'FORMKEEP_RESTORE_TEXT', text: 'intruder text', site: 'github.com' });
+    assert.strictEqual(response && response.success, false);
+    assert.strictEqual(response && response.error, 'Site mismatch');
+    assert.strictEqual(textarea.value, '');
+  });
+
+  it('refuses a FORMKEEP_RESTORE_TEXT that names no site at all', () => {
+    const { send } = loadRealContentScript();
+    const response = send({ type: 'FORMKEEP_RESTORE_TEXT', text: 'intruder text' });
+    assert.strictEqual(response && response.success, false);
+    assert.strictEqual(response && response.error, 'Site mismatch');
+  });
+
+  it('accepts a FORMKEEP_RESTORE_TEXT whose site matches the page hostname', () => {
+    const { textarea, send } = loadRealContentScript();
+    const response = send({ type: 'FORMKEEP_RESTORE_TEXT', text: 'matching site text', site: EXT_ID });
+    assert.strictEqual(response && response.success, true);
+    assert.strictEqual(textarea.value, 'matching site text');
   });
 });
 
