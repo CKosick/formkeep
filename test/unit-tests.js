@@ -89,6 +89,18 @@ function formatRelativeTime(timestamp, now = Date.now()) {
   return `${days}d ago`;
 }
 
+// Mirrors badgeTextForCount in background/service-worker.js
+function badgeTextForCountMock(count) {
+  if (!count || count <= 0) return '';
+  return count > 99 ? '99+' : String(count);
+}
+
+// Mirrors the first-save toast decision in background/service-worker.js:
+// the toast fires only when the saved site is not yet in firstSaveToastSites.
+function shouldShowFirstSaveToastMock(toastedSites, site) {
+  return !(toastedSites || []).includes(site);
+}
+
 // -------------------------------------------------------------
 // Test Execution Engine
 // -------------------------------------------------------------
@@ -186,6 +198,32 @@ describe('Sanitization & Utility Functions', () => {
     assert.strictEqual(formatRelativeTime(base, base + 120000), '2m ago');
     assert.strictEqual(formatRelativeTime(base, base + 7200000), '2h ago');
     assert.strictEqual(formatRelativeTime(base, base + 172800000), '2d ago');
+  });
+});
+
+describe('Visible Save Pulse (Badge & First-Save Toast)', () => {
+  it('shows no badge text when a site has zero snapshots', () => {
+    assert.strictEqual(badgeTextForCountMock(0), '');
+    assert.strictEqual(badgeTextForCountMock(-1), '');
+    assert.strictEqual(badgeTextForCountMock(undefined), '');
+  });
+
+  it('shows the snapshot count on the badge', () => {
+    assert.strictEqual(badgeTextForCountMock(1), '1');
+    assert.strictEqual(badgeTextForCountMock(42), '42');
+    assert.strictEqual(badgeTextForCountMock(99), '99');
+  });
+
+  it('caps very large badge counts', () => {
+    assert.strictEqual(badgeTextForCountMock(100), '99+');
+    assert.strictEqual(badgeTextForCountMock(1200), '99+');
+  });
+
+  it('fires the first-save toast only once per site', () => {
+    assert.strictEqual(shouldShowFirstSaveToastMock([], 'example.com'), true);
+    assert.strictEqual(shouldShowFirstSaveToastMock(['example.com'], 'example.com'), false);
+    assert.strictEqual(shouldShowFirstSaveToastMock(['example.com'], 'other.com'), true);
+    assert.strictEqual(shouldShowFirstSaveToastMock(undefined, 'example.com'), true);
   });
 });
 

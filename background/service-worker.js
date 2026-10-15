@@ -19,6 +19,85 @@ import {
 
 const CLEANUP_ALARM_NAME = 'formkeep-daily-cleanup';
 const DEFAULT_RETENTION_DAYS = 7;
+const BADGE_COLOR = '#4F46E5';
+
+/**
+ * Badge text for a snapshot count: empty when there is nothing saved,
+ * the count itself up to 99, then a capped label.
+ */
+function badgeTextForCount(count) {
+  if (!count || count <= 0) return '';
+  return count > 99 ? '99+' : String(count);
+}
+
+/**
+ * Mirror of the content script's per-site disable matching, so the badge
+ * respects the same paused state the page itself uses.
+ */
+function isSiteDisabledFor(hostname, disabledSites) {
+  const site = String(hostname || '').toLowerCase();
+  if (!site) return false;
+  return (disabledSites || []).some((entry) => {
+    const disabled = String(entry || '').toLowerCase();
+    return disabled && (site === disabled || site.endsWith('.' + disabled));
+  });
+}
+
+/**
+ * Refresh the toolbar badge for one tab so it shows how many snapshots are
+ * saved for the site in that tab. Cleared when the site is paused or has no
+ * snapshots. The site is learned from the tab's content script (the
+ * FORMKEEP_GET_STATUS round trip), because the badge must work without
+ * reading tab URLs directly. Best effort: unscriptable tabs are skipped.
+ */
+async function refreshBadgeForTab(tabId, knownSite) {
+  if (!tabId) return;
+  try {
+    let site = knownSite;
+    if (!site) {
+      const status = await chrome.tabs
+        .sendMessage(tabId, { type: 'FORMKEEP_GET_STATUS' })
+        .catch(() => null);
+      site = status?.site;
+    }
+    if (!site) return;
+    site = String(site).toLowerCase();
+
+    const { disabledSites = [] } = await chrome.storage.local.get('disabledSites');
+    let text = '';
+    if (!isSiteDisabledFor(site, disabledSites)) {
+      const entries = await getEntriesBySite(site, 500);
+      text = badgeTextForCount(entries.length);
+    }
+
+    await chrome.action.setBadgeText({ tabId, text });
+    if (text) {
+      try {
+        await chrome.action.setBadgeBackgroundColor({ tabId, color: BADGE_COLOR });
+      } catch (err) {
+        // Background color is cosmetic; the count itself already applied.
+      }
+    }
+  } catch (err) {
+    // Tab closed or not scriptable; badge refresh is best effort.
+  }
+}
+
+/**
+ * Refresh badges on every open tab (used after the paused-sites list changes).
+ */
+async function refreshAllTabBadges() {
+  try {
+    const tabs = await chrome.tabs.query({});
+    for (const tab of tabs) {
+      if (tab.id) {
+        refreshBadgeForTab(tab.id);
+      }
+    }
+  } catch (err) {
+    // Best effort only.
+  }
+}
 
 /**
  * Extension installation and update lifecycle.
@@ -150,6 +229,30 @@ chrome.commands.onCommand.addListener(async (command) => {
 });
 
 /**
+ * Keep the toolbar badge in step with the tab the user is looking at:
+ * switching tabs or finishing a page load re-reads that tab's site count.
+ */
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  refreshBadgeForTab(tabId);
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === 'complete') {
+    refreshBadgeForTab(tabId);
+  }
+});
+
+/**
+ * Pausing or resuming a site from the popup or options page must update the
+ * badge right away (a paused site shows no count).
+ */
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.disabledSites) {
+    refreshAllTabBadges();
+  }
+});
+
+/**
  * Central runtime message listener for content scripts and popup.
  * Always returns true for asynchronous sendResponse.
  */
@@ -163,7 +266,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       switch (message.type) {
         case 'FORMKEEP_SAVE_ENTRY': {
           const entry = await saveEntry(message.payload);
-          sendResponse({ success: true, entry });
+          let showFirstSaveToast = false;
+          if (entry) {
+            // Visible pulse part 1: the saving tab's badge now shows the
+            // snapshot count for its site.
+            if (sender.tab?.id) {
+              await refreshBadgeForTab(sender.tab.id, entry.site);
+            }
+            // Visible pulse part 2: the very first save on a site earns a
+            // one-time page toast (sent back to the content script, which
+            // owns the toast UI). Later saves on that site stay silent.
+            const { firstSaveToastSites = [] } = await chrome.storage.local.get('firstSaveToastSites');
+            if (!firstSaveToastSites.includes(entry.site)) {
+              firstSaveToastSites.push(entry.site);
+              await chrome.storage.local.set({ firstSaveToastSites });
+              showFirstSaveToast = true;
+            }
+          }
+          sendResponse({ success: true, entry, showFirstSaveToast });
+          break;
+        }
+
+        case 'FORMKEEP_PAGE_READY': {
+          // A content script has loaded on a page: sync that tab's badge.
+          if (sender.tab?.id && message.site) {
+            await refreshBadgeForTab(sender.tab.id, message.site);
+          }
+          sendResponse({ success: true });
           break;
         }
 

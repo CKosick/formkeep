@@ -29,6 +29,15 @@
         const { disabledSites = [] } = await chrome.storage.local.get('disabledSites');
         updateDisabledState(disabledSites);
 
+        // Let the service worker sync this tab's toolbar badge with the
+        // snapshot count for this site.
+        try {
+          chrome.runtime.sendMessage({ type: 'FORMKEEP_PAGE_READY', site: currentHostname });
+        } catch (e) {
+          // Service worker may be starting up; badge also refreshes on save,
+          // tab activation, and page load completion.
+        }
+
         chrome.storage.onChanged.addListener((changes, area) => {
           if (area === 'local' && changes.disabledSites) {
             updateDisabledState(changes.disabledSites.newValue || []);
@@ -227,19 +236,32 @@
 
       try {
         if (chrome.runtime?.id) {
-          chrome.runtime.sendMessage({
-            type: 'FORMKEEP_SAVE_ENTRY',
-            payload: {
-              site: currentHostname,
-              url: window.location.href,
-              title: document.title || currentHostname,
-              fieldKey,
-              fieldName,
-              fieldSelector,
-              fieldType,
-              text
+          chrome.runtime.sendMessage(
+            {
+              type: 'FORMKEEP_SAVE_ENTRY',
+              payload: {
+                site: currentHostname,
+                url: window.location.href,
+                title: document.title || currentHostname,
+                fieldKey,
+                fieldName,
+                fieldSelector,
+                fieldType,
+                text
+              }
+            },
+            (response) => {
+              // Reading lastError keeps an unavailable service worker from
+              // logging an unchecked error; saving itself is fire-and-forget.
+              void chrome.runtime.lastError;
+              // One-time confirmation the very first time a snapshot is saved
+              // on this site, so users learn the tool is alive. The service
+              // worker decides when this fires; later saves stay silent.
+              if (response?.showFirstSaveToast) {
+                showToast('FormKeep saved a snapshot of this field');
+              }
             }
-          });
+          );
         }
       } catch (e) {
         // Context invalidated
