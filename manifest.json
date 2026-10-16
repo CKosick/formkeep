@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "FormKeep - Automatic Form Recovery",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Silently saves what you type into web forms. Restore lost text with one click if a tab crashes, closes, or submit fails.",
   "icons": {
     "16": "icons/icon-16.png",

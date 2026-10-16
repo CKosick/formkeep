@@ -9,7 +9,7 @@ FormKeep - Automatic Form Recovery
 
 **Short Description** [REQUIRED]
 <!-- Max 132 characters. Shown in search results and tiles. Be specific about function. -->
-Silently saves text as you type into web forms. Restore lost writing with one click if a tab crashes, closes, or submit fails.
+Silently saves what you type into web forms. Restore lost text with one click if a tab crashes, closes, or submit fails.
 
 **Detailed Description** [REQUIRED]
 <!-- Max 16,000 characters. Line 1: One-sentence summary. Paragraph 2: Key features. Paragraph 3: How to use. Paragraph 4: Privacy/permissions note. Paragraph 5: Support info. -->
@@ -133,3 +133,4 @@ FormKeep does NOT collect, transmit, or share any user data off the device. All 
 | Version | Date | Changes | Status |
 |---------|------|---------|--------|
 | 1.0.0 | 2026-10-05 | Initial release of FormKeep Manifest V3. Local IndexedDB storage, one-click restore, context menu, keyboard shortcuts, retention alarms, and password exclusion. | Ready for Submission |
+| 1.1.0 | 2026-10-14 | First-run experience: welcome page with a live self-test, toolbar badge and one-time first-save toast, popup opens on All Recent when the current site is empty, plain explanations on browser pages and after auto-cleanup. Restore is now strictly same-site (fails closed, top frame only, refused by the content script on mismatch). Clear All Data also erases per-site history. | Pending review |
