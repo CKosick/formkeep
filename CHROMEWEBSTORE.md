@@ -123,7 +123,7 @@ FormKeep does NOT collect, transmit, or share any user data off the device. All 
 ## Developer Info
 
 **Publisher Name**: Cliff  
-**Contact Email**: support@formkeep.local  
+**Contact Email**: fallenhero007+formkeep@gmail.com  
 **Homepage URL**: https://github.com/CKosick/formkeep  
 
 ---
